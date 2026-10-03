@@ -383,7 +383,7 @@ namespace PVZRemake.Board
                 _glowTimer = 0f;
                 State = PlantState.Idle;
                 PlantAnim.ColorOverride = new Color4(1f, 1f, 1f, 1f);
-                Vector2 sunSpawnPos = Position + new Vector2(300f, -40f);
+                Vector2 sunSpawnPos = Position + new Vector2(30f, -40f);
                 BoardScene.CurrentItemManager?.SpawnItem(ItemType.SunNormal, sunSpawnPos);
             }
         }
@@ -473,7 +473,7 @@ namespace PVZRemake.Board
                         // Одна клетка поля ~80 пикселей. Зона 3х3 покрывает примерно по 150-180 пикселей влево и вправо.
                         float distanceX = MathF.Abs(zombie.Position.X - Position.X);
 
-                        if (distanceX <= 180f && zombie.State != ZombieState.Dying && !zombie.IsDead) zombie.TakeDamage(EXPLOSION_DAMAGE);
+                        if (distanceX <= 180f && zombie.State != ZombieState.Dying && !zombie.IsDead) zombie.TakeDamage(EXPLOSION_DAMAGE, PlantDamageType.Explosion);
                     }
                 }
             }
@@ -494,14 +494,882 @@ namespace PVZRemake.Board
             base.Update(dt, projectileManager);
         }
     }
-    public class PotatoMine(int r, int c) : Plant(PlantType.PotatoMine, r, c) { }
-    public class SnowPea(int r, int c) : Plant(PlantType.SnowPea, r, c) { }
-    public class Chomper(int r, int c) : Plant(PlantType.Chomper, r, c) { }
-    public class Repeater(int r, int c) : Plant(PlantType.Repeater, r, c) { }
+    public class PotatoMine : Plant
+    {
+        private float _activationTimer = 0f;
+        private const float ACTIVATION_DELAY = 15.0f; // Время взвода мины
+        private bool _isArmed = false;
+        private bool _isExploding = false;
 
-    public class PuffShroom(int r, int c) : Plant(PlantType.PuffShroom, r, c) { }
-    public class SunShroom(int r, int c) : Plant(PlantType.SunShroom, r, c) { }
-    public class FumeShroom(int r, int c) : Plant(PlantType.FumeShroom, r, c) { }
+        public PotatoMine(int row, int col) : base(PlantType.PotatoMine, row, col) { SunCost = 25; }
+
+        public override void Initialize()
+        {
+            base.Initialize();
+            PlantAnim.SetFrameBounds("anim_idle"); // Начальное состояние — под землей
+            PlantAnim.LoopType = ReanimLoopType.Loop;
+        }
+
+        public override void Update(float dt, ProjectileManager projectileManager)
+        {
+            if (IsDead) return;
+
+            PlantAnim?.Update(dt);
+
+            // Если растение в состоянии активного геймплея
+            if (State == PlantState.Idle)
+            {
+                if (!_isArmed)
+                {
+                    _activationTimer += dt;
+                    if (_activationTimer >= ACTIVATION_DELAY)
+                    {
+                        _isArmed = true;
+                        // Оригинальный переход: сначала проигрывается анимация подъема "anim_rise"
+                        PlantAnim.LoopType = ReanimLoopType.PlayOnceAndHold;
+                        PlantAnim.SetFrameBounds("anim_rise");
+                    }
+                }
+                else if (!_isExploding)
+                {
+                    // КРИТИЧЕСКИЙ ФИКС АНИМАЦИИ: Ждем окончания анимации подъема, прежде чем зациклить anim_armed
+                    if (PlantAnim.LoopType == ReanimLoopType.PlayOnceAndHold && PlantAnim._animTime >= 0.95f)
+                    {
+                        PlantAnim.LoopType = ReanimLoopType.Loop;
+                        PlantAnim.SetFrameBounds("anim_armed");
+                        Console.WriteLine("[PotatoMine] Мина полностью поднялась и взведена!");
+                    }
+
+                    // Проверяем взрыв только если мина в режиме ожидания (anim_armed)
+                    if (PlantAnim.LoopType == ReanimLoopType.Loop && CheckZombieCollision())
+                    {
+                        TriggerExplosionEffect();
+                        ExecuteExplosionDamage();
+                    }
+                }
+            }
+        }
+
+        private bool CheckZombieCollision()
+        {
+            var activeZombies = BoardScene.CurrentZombies;
+            if (activeZombies == null) return false;
+
+            foreach (var zombie in activeZombies)
+            {
+                if (zombie.Row == Row && !zombie.IsDead && zombie.State != ZombieState.Dying)
+                {
+                    float distanceX = MathF.Abs(zombie.Position.X - Position.X);
+                    if (distanceX <= 40f) // Зомби наступил на мину
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        private void TriggerExplosionEffect()
+        {
+            _isExploding = true;
+            // Переключаем скелет на анимацию взрыва и даем ей проиграться!
+            PlantAnim.LoopType = ReanimLoopType.PlayOnce;
+            PlantAnim.SetFrameBounds("anim_explode");
+
+            // Сразу спавним визуальный эффект "SPUDOW!"
+            Vector2 explosionCenter = Position + new Vector2(40f, 40f);
+            BoardScene.CurrentParticleManager?.SpawnEffect("PARTICLE_POTATOMINE", explosionCenter);
+        }
+
+        private void ExecuteExplosionDamage()
+        {
+            Health = 0;
+            SetState(PlantState.Dying);
+
+            // Наносим урон 1800 всем зомби в радиусе клетки
+            var activeZombies = BoardScene.CurrentZombies;
+            if (activeZombies != null)
+            {
+                for (int i = activeZombies.Count - 1; i >= 0; i--)
+                {
+                    var zombie = activeZombies[i];
+                    if (zombie.Row == Row && MathF.Abs(zombie.Position.X - Position.X) <= 60f)
+                    {
+                        zombie.TakeDamage(1800, PlantDamageType.Explosion);
+                    }
+                }
+            }
+        }
+
+        protected override void OnStateChanged(PlantState newState)
+        {
+            if (PlantAnim == null) return;
+
+            switch (newState)
+            {
+                case PlantState.Idle:
+                    PlantAnim.ColorOverride = new Color4(1f, 1f, 1f, 1f);
+                    PlantAnim.SetFrameBounds(_isArmed ? "anim_armed" : "anim_idle");
+                    break;
+            }
+        }
+    }
+
+    public class SnowPea : Plant
+    {
+        private float _shootTimer = 0f;
+        private const float SHOOT_INTERVAL = 1.5f;
+        private Reanimation _headAnim;
+        private bool _isAttacking = false;
+        private bool _hasSpawnedProjectile = false;
+
+        public SnowPea(int row, int col) : base(PlantType.SnowPea, row, col) { SunCost = 175; }
+
+        public override void Initialize()
+        {
+            base.Initialize();
+
+            string animKey = $"REANIM_{Type.ToString().ToUpper()}";
+            ReanimDefinition def = AssetManager.GetAnimation(animKey);
+
+            if (def != null && AssetManager.Active != null)
+            {
+                PlantAnim.SetFrameBounds("anim_idle");
+                PlantAnim.LoopType = ReanimLoopType.Loop;
+
+                _headAnim = new Reanimation(def, AssetManager.Active)
+                {
+                    LoopType = ReanimLoopType.Loop,
+                    Scale = new Vector2(1.5f, 1.5f)
+                };
+                _headAnim.SetFrameBounds("anim_head_idle");
+            }
+        }
+
+        public override void Update(float dt, ProjectileManager projectileManager)
+        {
+            if (IsDead) return;
+
+            PlantAnim?.Update(dt);
+
+            if (PlantAnim != null && _headAnim != null)
+            {
+                _headAnim.Position = PlantAnim.GetTrackPosition("anim_stem") + new Vector2(-56f, -70f);
+                _headAnim.Update(dt * 2f);
+            }
+
+            _shootTimer += dt;
+
+            if (HasZombieInLane())
+            {
+                if (!_isAttacking && _shootTimer >= (SHOOT_INTERVAL - 0.5f))
+                {
+                    _isAttacking = true;
+                    _hasSpawnedProjectile = false;
+                    if (_headAnim != null)
+                    {
+                        _headAnim.LoopType = ReanimLoopType.PlayOnceAndHold;
+                        _headAnim.SetFrameBounds("anim_shooting");
+                    }
+                }
+
+                if (_isAttacking && !_hasSpawnedProjectile && _shootTimer >= SHOOT_INTERVAL)
+                {
+                    _hasSpawnedProjectile = true;
+                    Vector2 spawnPos = Position + new Vector2(85f, 25f);
+
+                    // Спавним замораживающий горох (проверьте точное имя типа в вашем ProjectileType)
+                    projectileManager.SpawnProjectile(ProjectileType.SnowPea, Row, spawnPos);
+
+                    _shootTimer -= SHOOT_INTERVAL;
+                }
+            }
+            else if (_shootTimer > (SHOOT_INTERVAL - 0.5f) && !_isAttacking)
+            {
+                _shootTimer = SHOOT_INTERVAL - 0.5f;
+            }
+
+            if (_isAttacking && _headAnim != null && (_headAnim._animTime >= 0.98f || _headAnim.IsDead))
+            {
+                _isAttacking = false;
+                _headAnim.LoopType = ReanimLoopType.Loop;
+                _headAnim.SetFrameBounds("anim_head_idle");
+            }
+        }
+
+        private bool HasZombieInLane()
+        {
+            var activeZombies = BoardScene.CurrentZombies;
+            if (activeZombies == null) return false;
+
+            foreach (var zombie in activeZombies)
+            {
+                if (zombie.Row == Row &&
+                    zombie.State != ZombieState.Dying &&
+                    !zombie.IsDead &&
+                    zombie.Position.X >= Position.X &&
+                    zombie.Position.X < 1600f)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public override void Render(SpriteBatch batch, Vector2? camera_offset)
+        {
+            if (IsDead) return;
+
+            var shadowTexture = (TextureRegion)AssetManager.GetTexture("IMAGE_REANIM_PLANTSHADOW");
+            batch.Draw(shadowTexture, Position + new Vector2(0f, 80f), new Vector2(1.5f, 1.5f), 0f, Color4.White);
+
+            PlantAnim?.Position = Position + (camera_offset ?? Vector2.Zero);
+            PlantAnim?.Render(batch);
+
+            Vector2? baseHeadPos = _headAnim?.Position;
+            _headAnim?.Position += (camera_offset ?? Vector2.Zero);
+            _headAnim?.Render(batch);
+            _headAnim?.Position = (Vector2)baseHeadPos;
+        }
+    }
+
+    public class Chomper : Plant
+    {
+        private float _chewTimer = 0f;
+        private const float CHEW_DURATION = 30.0f; // Время пережевывания
+        private bool _isChewing = false;
+        private bool _isBiting = false;
+        private Zombie? _targetZombie = null;
+
+        public Chomper(int row, int col) : base(PlantType.Chomper, row, col) { SunCost = 150; }
+
+        public override void Initialize()
+        {
+            base.Initialize();
+            PlantAnim.SetFrameBounds("anim_idle");
+            PlantAnim.LoopType = ReanimLoopType.Loop;
+        }
+
+        public override void Update(float dt, ProjectileManager projectileManager)
+        {
+            if (IsDead) return;
+
+            PlantAnim?.Update(dt);
+
+            if (State == PlantState.Idle)
+            {
+                if (_isChewing)
+                {
+                    _chewTimer -= dt;
+                    if (_chewTimer <= 0f)
+                    {
+                        if (PlantAnim.HasMarker("anim_swallow") && PlantAnim.FrameBoundsName != "anim_swallow")
+                        {
+                            PlantAnim.LoopType = ReanimLoopType.PlayOnceAndHold;
+                            PlantAnim.SetFrameBounds("anim_swallow");
+                        }
+                        if (PlantAnim.FrameBoundsName == "anim_swallow" && (PlantAnim._animTime >= 0.95f || PlantAnim.IsDead))
+                        {
+                            _isChewing = false;
+                            PlantAnim.LoopType = ReanimLoopType.Loop;
+                            PlantAnim.SetFrameBounds("anim_idle");
+                        }
+                    }
+                }
+                else if (_isBiting)
+                {
+                    if (PlantAnim._animTime >= 0.65f && _targetZombie != null && !_targetZombie.IsDead && _targetZombie.State != ZombieState.Dying) _targetZombie.TakeDamage(int.MaxValue, PlantDamageType.Instant);
+
+                    if (PlantAnim._animTime >= 0.95f || PlantAnim.IsDead)
+                    {
+                        _isBiting = false;
+
+                        if (_targetZombie != null && !_targetZombie.IsDead && _targetZombie.State != ZombieState.Dying)
+                        {
+                             
+                            _isChewing = true;
+                            _chewTimer = CHEW_DURATION;
+                            PlantAnim.LoopType = ReanimLoopType.Loop;
+                            PlantAnim.SetFrameBounds("anim_chew");
+                        }
+                        else
+                        {
+                            // Если зомби успел умереть от гороха во время броска Зубастика — промах, возврат в Idle
+                            PlantAnim.LoopType = ReanimLoopType.Loop;
+                            PlantAnim.SetFrameBounds("anim_idle");
+                        }
+                        _targetZombie = null;
+                    }
+                }
+                else
+                {
+                    // Обычное состояние ожидания цели
+                    Zombie target = FindTargetZombie();
+                    if (target != null)
+                    {
+                        StartBiteSequence(target);
+                    }
+                }
+            }
+        }
+
+        private Zombie FindTargetZombie()
+        {
+            var activeZombies = BoardScene.CurrentZombies;
+            if (activeZombies == null) return null;
+
+            foreach (var zombie in activeZombies)
+            {
+                if (zombie.Row == Row && !zombie.IsDead && zombie.State != ZombieState.Dying)
+                {
+                    float diffX = zombie.Position.X - Position.X;
+                    if (diffX >= 0f && diffX <= 120f) // Диапазон укуса (~1.5 клетки)
+                    {
+                        return zombie;
+                    }
+                }
+            }
+            return null;
+        }
+
+        private void StartBiteSequence(Zombie target)
+        {
+            _isBiting = true;
+            _targetZombie = target;
+
+            PlantAnim.LoopType = ReanimLoopType.PlayOnceAndHold;
+            PlantAnim.SetFrameBounds("anim_bite");
+        }
+        protected override void OnStateChanged(PlantState newState)
+        {
+            if (PlantAnim == null) return;
+            switch (newState)
+            {
+                case PlantState.Idle:
+                    PlantAnim.ColorOverride = new Color4(1f, 1f, 1f, 1f);
+                    PlantAnim.SetFrameBounds(_isChewing ? "anim_chew" : "anim_idle");
+                    break;
+            }
+        }
+    }
+
+    public class Repeater : Plant
+    {
+        private float _shootTimer = 0f;
+        private const float SHOOT_INTERVAL = 1.5f;
+        private Reanimation _headAnim;
+        private bool _isAttacking = false;
+
+        // Переменные для механики двойного выстрела
+        private int _peasToLaunch = 0;
+        private float _burstTimer = 0f;
+        private const float BURST_DELAY = 0.15f; // Задержка между первым и вторым горохом
+
+        public Repeater(int row, int col) : base(PlantType.Repeater, row, col) { SunCost = 200; }
+
+        public override void Initialize()
+        {
+            base.Initialize();
+
+            string animKey = $"REANIM_{Type.ToString().ToUpper()}";
+            ReanimDefinition def = AssetManager.GetAnimation(animKey);
+
+            if (def != null && AssetManager.Active != null)
+            {
+                PlantAnim.SetFrameBounds("anim_idle");
+                PlantAnim.LoopType = ReanimLoopType.Loop;
+
+                _headAnim = new Reanimation(def, AssetManager.Active)
+                {
+                    LoopType = ReanimLoopType.Loop,
+                    Scale = new Vector2(1.5f, 1.5f)
+                };
+                _headAnim.SetFrameBounds("anim_head_idle");
+            }
+        }
+
+        public override void Update(float dt, ProjectileManager projectileManager)
+        {
+            if (IsDead) return;
+
+            PlantAnim?.Update(dt);
+
+            if (PlantAnim != null && _headAnim != null)
+            {
+                _headAnim.Position = PlantAnim.GetTrackPosition("anim_stem") + new Vector2(-56f, -70f);
+                _headAnim.Update(dt * 2f);
+            }
+
+            _shootTimer += dt;
+
+            // Логика интервальной проверки зомби и взвода анимации
+            if (HasZombieInLane())
+            {
+                if (!_isAttacking && _shootTimer >= (SHOOT_INTERVAL - 0.5f))
+                {
+                    _isAttacking = true;
+                    _peasToLaunch = 2; // Заряжаем 2 горошины для выстрела
+                    _burstTimer = BURST_DELAY; // Готовим таймер для моментального первого выстрела
+
+                    if (_headAnim != null)
+                    {
+                        _headAnim.LoopType = ReanimLoopType.PlayOnceAndHold;
+                        _headAnim.SetFrameBounds("anim_shooting");
+                    }
+                }
+            }
+            else if (_shootTimer > (SHOOT_INTERVAL - 0.5f) && !_isAttacking)
+            {
+                _shootTimer = SHOOT_INTERVAL - 0.5f;
+            }
+
+            // Механика выпуска очереди снарядов
+            if (_isAttacking && _peasToLaunch > 0)
+            {
+                _burstTimer += dt;
+                if (_burstTimer >= BURST_DELAY && _shootTimer >= SHOOT_INTERVAL)
+                {
+                    Vector2 spawnPos = Position + new Vector2(85f, 25f);
+                    projectileManager.SpawnProjectile(ProjectileType.Pea, Row, spawnPos);
+
+                    _peasToLaunch--;
+                    _burstTimer = 0f;
+
+                    // Когда обе горошины вылетели, сбрасываем основной кулдаун атаки
+                    if (_peasToLaunch == 0)
+                    {
+                        _shootTimer -= SHOOT_INTERVAL;
+                    }
+                }
+            }
+
+            // Возврат головы в idle состояние по завершении анимации
+            if (_isAttacking && _peasToLaunch == 0 && _headAnim != null && (_headAnim._animTime >= 0.98f || _headAnim.IsDead))
+            {
+                _isAttacking = false;
+                _headAnim.LoopType = ReanimLoopType.Loop;
+                _headAnim.SetFrameBounds("anim_head_idle");
+            }
+        }
+
+        private bool HasZombieInLane()
+        {
+            var activeZombies = BoardScene.CurrentZombies;
+            if (activeZombies == null) return false;
+
+            foreach (var zombie in activeZombies)
+            {
+                if (zombie.Row == Row &&
+                    zombie.State != ZombieState.Dying &&
+                    !zombie.IsDead &&
+                    zombie.Position.X >= Position.X &&
+                    zombie.Position.X < 1600f)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public override void Render(SpriteBatch batch, Vector2? camera_offset)
+        {
+            if (IsDead) return;
+
+            var shadowTexture = (TextureRegion)AssetManager.GetTexture("IMAGE_REANIM_PLANTSHADOW");
+            batch.Draw(shadowTexture, Position + new Vector2(0f, 80f), new Vector2(1.5f, 1.5f), 0f, Color4.White);
+
+            PlantAnim?.Position = Position + (camera_offset ?? Vector2.Zero);
+            PlantAnim?.Render(batch);
+
+            Vector2? baseHeadPos = _headAnim?.Position;
+            _headAnim?.Position += (camera_offset ?? Vector2.Zero);
+            _headAnim?.Render(batch);
+            _headAnim?.Position = (Vector2)baseHeadPos;
+        }
+    }
+
+
+    public class PuffShroom : Plant
+    {
+        private float _shootTimer = 0f;
+        private const float SHOOT_INTERVAL = 1.5f;
+        private bool _isAttacking = false;
+
+        public PuffShroom(int row, int col) : base(PlantType.PuffShroom, row, col) { SunCost = 0; }
+
+        public override void Initialize()
+        {
+            base.Initialize();
+            UpdateSleepState();
+        }
+
+        private void UpdateSleepState()
+        {
+            if (BoardScene.IsDay)
+            {
+                SetState(PlantState.Ready); // Стейт сна
+            }
+            else
+            {
+                SetState(PlantState.Idle);
+            }
+        }
+
+        public override void Update(float dt, ProjectileManager projectileManager)
+        {
+            if (IsDead) return;
+
+            PlantAnim?.Update(dt);
+
+            // Если наступил день или изначально был день — гриб засыпает
+            if (BoardScene.IsDay && State != PlantState.Ready)
+            {
+                SetState(PlantState.Ready);
+            }
+            else if (!BoardScene.IsDay && State == PlantState.Ready)
+            {
+                SetState(PlantState.Idle);
+            }
+
+            // Боевая логика работает только в бодрствующем состоянии
+            if (State == PlantState.Idle)
+            {
+                _shootTimer += dt;
+
+                if (HasZombieInShortRange())
+                {
+                    if (!_isAttacking && _shootTimer >= (SHOOT_INTERVAL - 0.3f))
+                    {
+                        _isAttacking = true;
+                        PlantAnim.LoopType = ReanimLoopType.PlayOnceAndHold;
+                        PlantAnim.SetFrameBounds("anim_shooting");
+                        PlantAnim._animRate = 24f;
+                    }
+
+                    if (_isAttacking && _shootTimer >= SHOOT_INTERVAL)
+                    {
+                        Vector2 spawnPos = Position + new Vector2(70f, 70f);
+                        projectileManager.SpawnProjectile(ProjectileType.Puff, Row, spawnPos);
+                        _shootTimer -= SHOOT_INTERVAL;
+                    }
+                }
+                else if (_shootTimer > (SHOOT_INTERVAL - 0.3f) && !_isAttacking)
+                {
+                    _shootTimer = SHOOT_INTERVAL - 0.3f;
+                }
+
+                // Возврат в анимацию покачивания
+                if (_isAttacking && (PlantAnim._animTime >= 0.95f || PlantAnim.IsDead))
+                {
+                    _isAttacking = false;
+                    PlantAnim.LoopType = ReanimLoopType.Loop;
+                    PlantAnim.SetFrameBounds("anim_idle");
+                    PlantAnim._animRate = 12f;
+                }
+            }
+        }
+
+        private bool HasZombieInShortRange()
+        {
+            var activeZombies = BoardScene.CurrentZombies;
+            if (activeZombies == null) return false;
+
+            foreach (var zombie in activeZombies)
+            {
+                if (zombie.Row == Row && !zombie.IsDead && zombie.State != ZombieState.Dying)
+                {
+                    float diffX = zombie.Position.X - Position.X;
+                    // PuffShroom атакует только в пределах ~3 клеток перед собой (~240-300 пикселей)
+                    if (diffX >= 0f && diffX <= 360f)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        protected override void OnStateChanged(PlantState newState)
+        {
+            if (PlantAnim == null) return;
+
+            switch (newState)
+            {
+                case PlantState.Idle:
+                    PlantAnim.ColorOverride = new Color4(1f, 1f, 1f, 1f);
+                    PlantAnim.LoopType = ReanimLoopType.Loop;
+                    PlantAnim.SetFrameBounds("anim_idle");
+                    break;
+
+                case PlantState.Ready: // Режим сна
+                    PlantAnim.LoopType = ReanimLoopType.Loop;
+                    PlantAnim.SetFrameBounds("anim_idle");
+                    PlantAnim.ColorOverride = new Color4(0.5f, 0.5f, 0.65f, 1f); // Затемнение PopCap
+                    break;
+            }
+        }
+    }
+
+    public class SunShroom : Plant
+    {
+        private float _sunProduceTimer = 0f;
+        private const float SUN_COOLDOWN = 20f;
+        private float _growthTimer = 0f;
+        private const float GROWTH_DELAY = 120f; // 2 минуты до вырастания
+
+        private bool _isBig = false;
+        private bool _isGrowing = false;
+        private bool _isGlowing = false;
+        private float _glowTimer = 0f;
+
+        public SunShroom(int row, int col) : base(PlantType.SunShroom, row, col) { SunCost = 25; }
+
+        public override void Initialize()
+        {
+            base.Initialize();
+            _sunProduceTimer = SUN_COOLDOWN - (5f + Random.Shared.NextSingle() * 3f);
+
+            if (BoardScene.IsDay)
+            {
+                SetState(PlantState.Ready);
+            }
+            else
+            {
+                PlantAnim.SetFrameBounds("anim_idle"); // Маленький idle
+                PlantAnim.LoopType = ReanimLoopType.Loop;
+            }
+        }
+
+        public override void Update(float dt, ProjectileManager projectileManager)
+        {
+            if (IsDead) return;
+
+            PlantAnim?.Update(dt);
+
+            if (BoardScene.IsDay && State != PlantState.Ready)
+            {
+                SetState(PlantState.Ready);
+            }
+            else if (!BoardScene.IsDay && State == PlantState.Ready)
+            {
+                SetState(PlantState.Idle);
+            }
+
+            if (State == PlantState.Idle)
+            {
+                // Логика взросления гриба
+                if (!_isBig && !_isGrowing)
+                {
+                    _growthTimer += dt;
+                    if (_growthTimer >= GROWTH_DELAY)
+                    {
+                        _isGrowing = true;
+                        PlantAnim.LoopType = ReanimLoopType.PlayOnceAndHold;
+                        PlantAnim.SetFrameBounds("anim_grow");
+                    }
+                }
+
+                // Ожидание окончания фазы роста
+                if (_isGrowing && (PlantAnim._animTime >= 0.95f || PlantAnim.IsDead))
+                {
+                    _isGrowing = false;
+                    _isBig = true;
+                    PlantAnim.LoopType = ReanimLoopType.Loop;
+                    PlantAnim.SetFrameBounds("anim_bigidle"); 
+                }
+
+                // Производство солнца
+                _sunProduceTimer += dt;
+
+                if (!_isGlowing && _sunProduceTimer >= (SUN_COOLDOWN - 1.5f))
+                {
+                    _isGlowing = true;
+                }
+
+                if (_isGlowing)
+                {
+                    _glowTimer += dt;
+                    float glowIntensity = MathF.Sin(_glowTimer * 6f) * 0.15f;
+                    PlantAnim.ColorOverride = new Color4(1f, 1f, 0.7f + glowIntensity, 1f);
+                }
+
+                if (_sunProduceTimer >= SUN_COOLDOWN)
+                {
+                    _sunProduceTimer = 0f;
+                    _isGlowing = false;
+                    _glowTimer = 0f;
+                    PlantAnim.ColorOverride = new Color4(1f, 1f, 1f, 1f);
+
+                    Vector2 sunSpawnPos = Position + new Vector2(40f, 0f);
+
+                    // Проверяем тип создаваемого солнца в зависимости от возраста
+                    ItemType sunType = _isBig ? ItemType.SunNormal : ItemType.SunSmall; // Убедитесь, что SunSmall зарегистрирован в ItemType
+                    BoardScene.CurrentItemManager?.SpawnItem(sunType, sunSpawnPos);
+                }
+            }
+        }
+
+        protected override void OnStateChanged(PlantState newState)
+        {
+            if (PlantAnim == null) return;
+
+            switch (newState)
+            {
+                case PlantState.Idle:
+                    PlantAnim.ColorOverride = new Color4(1f, 1f, 1f, 1f);
+                    PlantAnim.LoopType = ReanimLoopType.Loop;
+                    PlantAnim.SetFrameBounds(_isBig ? "anim_bigidle" : "anim_idle");
+                    break;
+
+                case PlantState.Ready: // Сон
+                    PlantAnim.LoopType = ReanimLoopType.Loop;
+                    PlantAnim.SetFrameBounds(_isBig ? "anim_bigsleep" : "anim_idle"); // PopCap содержит anim_bigsleep для взрослого
+                    PlantAnim.ColorOverride = new Color4(0.45f, 0.45f, 0.6f, 1f);
+                    break;
+            }
+        }
+    }
+    public class FumeShroom : Plant
+    {
+        private float _shootTimer = 0f;
+        private const float SHOOT_INTERVAL = 1.5f;
+        private bool _isAttacking = false;
+        private bool _hasDealtDamage = false;
+
+        public FumeShroom(int row, int col) : base(PlantType.FumeShroom, row, col) { SunCost = 75; }
+
+        public override void Initialize()
+        {
+            base.Initialize();
+            if (BoardScene.IsDay) SetState(PlantState.Ready);
+        }
+
+        public override void Update(float dt, ProjectileManager projectileManager)
+        {
+            if (IsDead) return;
+
+            PlantAnim?.Update(dt);
+
+            if (BoardScene.IsDay && State != PlantState.Ready)
+            {
+                SetState(PlantState.Ready);
+            }
+            else if (!BoardScene.IsDay && State == PlantState.Ready)
+            {
+                SetState(PlantState.Idle);
+            }
+
+            if (State == PlantState.Idle)
+            {
+                _shootTimer += dt;
+
+                if (HasZombieInFumeRange())
+                {
+                    if (!_isAttacking && _shootTimer >= (SHOOT_INTERVAL - 0.4f))
+                    {
+                        _isAttacking = true;
+                        _hasDealtDamage = false;
+                        PlantAnim.LoopType = ReanimLoopType.PlayOnceAndHold;
+                        PlantAnim.SetFrameBounds("anim_shooting");
+                        PlantAnim._animRate = 24f;
+                    }
+
+                    // В момент пика анимации атаки наносим урон области
+                    if (_isAttacking && !_hasDealtDamage && _shootTimer >= (SHOOT_INTERVAL - 0.1f))
+                    {
+                        _hasDealtDamage = true;
+                        ExecuteFumeAreaDamage();
+                    }
+
+                    if (_isAttacking && _shootTimer >= SHOOT_INTERVAL)
+                    {
+                        _shootTimer -= SHOOT_INTERVAL;
+                    }
+                }
+                else if (_shootTimer > (SHOOT_INTERVAL - 0.4f) && !_isAttacking)
+                {
+                    _shootTimer = SHOOT_INTERVAL - 0.4f;
+                }
+
+                if (_isAttacking && (PlantAnim._animTime >= 0.99f || PlantAnim.IsDead))
+                {
+                    _isAttacking = false;
+                    PlantAnim.LoopType = ReanimLoopType.Loop;
+                    PlantAnim.SetFrameBounds("anim_idle");
+                    PlantAnim._animRate = 12f;
+                }
+            }
+        }
+
+        private bool HasZombieInFumeRange()
+        {
+            var activeZombies = BoardScene.CurrentZombies;
+            if (activeZombies == null) return false;
+
+            foreach (var zombie in activeZombies)
+            {
+                if (zombie.Row == Row && !zombie.IsDead && zombie.State != ZombieState.Dying)
+                {
+                    float diffX = zombie.Position.X - Position.X;
+                    // Дальность поражения дымом составляет ~4 клетки впереди газона (340 пикселей)
+                    if (diffX >= 0f && diffX <= 480f)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        private void ExecuteFumeAreaDamage()
+        {
+            // Спавним систему частиц дыма перед грибом (проверьте имя "PARTICLE_FUMECLOUD")
+            for (int i = 0; i < 20; i++)
+            {
+                Vector2 particlePos = Position + new Vector2(110f + 25 * i, 35f);
+                BoardScene.CurrentParticleManager?.SpawnEffect("PARTICLE_FUMECLOUD", particlePos);
+            }
+            var activeZombies = BoardScene.CurrentZombies;
+            if (activeZombies != null)
+            {
+                // Дымогриб наносит урон ВСЕМ зомби, находящимся в облаке дыма одновременно
+                for (int i = activeZombies.Count - 1; i >= 0; i--)
+                {
+                    var zombie = activeZombies[i];
+                    if (zombie.Row == Row && !zombie.IsDead && zombie.State != ZombieState.Dying)
+                    {
+                        float diffX = zombie.Position.X - Position.X;
+                        if (diffX >= 0f && diffX <= 480f)
+                        {
+                            // Наносим базовый гороховый урон (20 ед), проходящий сквозь двери/щиты
+                            zombie.TakeDamage(20, PlantDamageType.Default);
+                        }
+                    }
+                }
+            }
+        }
+
+        protected override void OnStateChanged(PlantState newState)
+        {
+            if (PlantAnim == null) return;
+
+            switch (newState)
+            {
+                case PlantState.Idle:
+                    PlantAnim.ColorOverride = new Color4(1f, 1f, 1f, 1f);
+                    PlantAnim.LoopType = ReanimLoopType.Loop;
+                    PlantAnim.SetFrameBounds("anim_idle");
+                    break;
+
+                case PlantState.Ready: // Сон
+                    PlantAnim.LoopType = ReanimLoopType.Loop;
+                    PlantAnim.SetFrameBounds("anim_sleep"); // У FumeShroom оригинальный маркер anim_sleep присутствует
+                    PlantAnim.ColorOverride = new Color4(0.5f, 0.5f, 0.65f, 1f);
+                    break;
+            }
+        }
+    }
+
     public class GraveBuster(int r, int c) : Plant(PlantType.GraveBuster, r, c) { }
     public class HypnoShroom(int r, int c) : Plant(PlantType.HypnoShroom, r, c) { }
     public class ScaredyShroom(int r, int c) : Plant(PlantType.ScaredyShroom, r, c) { }

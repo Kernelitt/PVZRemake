@@ -35,10 +35,23 @@ namespace PVZRemake.Scenes
         private readonly string LevelName = levelName;
         private ItemManager _itemManager;
         private bool isDay = true;
+
+        public static bool IsDay { get; private set; }
         public static ItemManager? CurrentItemManager { get; private set; }
         public static ParticleEffectManager? CurrentParticleManager { get; private set; }
         public static List<Zombie> CurrentZombies { get; private set; } = [];
-
+        private static readonly CrazyDaveShop _shopOverlay = new();
+        private static readonly UIButton _shopButton = new()
+        {
+            TextureIdle = (TextureRegion)AssetManager.GetTexture("IMAGE_REANIM_SEEDCHOOSER_BUTTON2"),
+            TextureHover = (TextureRegion)AssetManager.GetTexture("IMAGE_REANIM_SEEDCHOOSER_BUTTON2_GLOW"),
+            Size = new Vector2(111,26),
+            Position = new Vector2(750,600),
+            OnClick = () =>
+            {
+                _shopOverlay.IsVisible = true;
+            }
+        };
         public void Initialize()
         {
             zombies_won = ReanimDatabase.CreateRuntimeAnimation("REANIM_ZOMBIESWON");
@@ -66,6 +79,7 @@ namespace PVZRemake.Scenes
             _projectileManager = new ProjectileManager();
             _particleEffectManager = new ParticleEffectManager();
 
+            
             CurrentItemManager = _itemManager;
             CurrentParticleManager = _particleEffectManager;
             CurrentZombies = _zombies;
@@ -106,21 +120,26 @@ namespace PVZRemake.Scenes
                     _backgroundTexture = (TextureRegion)AssetManager.GetTexture("IMAGE_REANIM_BACKGROUND5");
                     break;
             }
+            IsDay = isDay;
         }
         public void Update(float dt)
         {
+            // ИСПРАВЛЕНО: Безопасное накопление времени игры без постоянного насилия жесткого диска в цикле Update
+            if (LawnApp.CurrentUser != null)
+            {
+                // Накапливаем время напрямую в активный профиль оперативной памяти фреймворка
+                LawnApp.CurrentUser.TotalPlayTime = LawnApp.CurrentUser.TotalPlayTime.Add(TimeSpan.FromSeconds(dt));
+            }
+
             switch (_currentState)
             {
                 case GameLevelState.Dialogue:
                     if (Input.IsMouseButtonPressed(MouseButton.Left))
                     {
                         _currentState = GameLevelState.PanToZombies;
-
-                        // ИНИЦИАЛИЗАЦИЯ ПАНOРАМЫ ВПРАВО
                         _panTimer = 0f;
                         _panStartX = CAM_X_DIALOGUE;
 
-                        // ФИКС: Спавним зомби для превью перед тем, как камера поедет!
                         LevelDefinition levelConfig = LevelDatabase.GetLevelConfig(LevelName);
                         SpawnPreviewZombies(levelConfig);
 
@@ -131,37 +150,35 @@ namespace PVZRemake.Scenes
                 case GameLevelState.PanToZombies:
                     _panTimer += dt;
                     float progressRight = Math.Clamp(_panTimer / PAN_DURATION, 0f, 1f);
-
                     _backgroundOffset.X = TodCurveMath.TodCurveEvaluate(progressRight, _panStartX, CAM_X_ZOMBIES, TodCurves.CURVE_EASE_IN_OUT);
 
-                    // Пока камера едет, зомби уже должны плавно дышать на траве, проплывая мимо экрана
                     foreach (var z in _previewZombies) z.Update(dt, _plants);
 
                     if (progressRight >= 1f)
                     {
-                        // Камера приехала в самый правый угол к зомби!
                         _currentState = GameLevelState.ChoosingSeeds;
-
-                        // ТРИГГЕРЫ ПЛАВНОГО ПОЯВЛЕНИЯ ИНТЕРФЕЙСА:
-                        _seedChooser.StartAppearanceAnimation(); // Выезжает снизу по кривой
-                        _seedBank.StartAppearanceAnimation();    // Опускается сверху по кривой
+                        _seedChooser.StartAppearanceAnimation();
+                        _seedBank.StartAppearanceAnimation();
                     }
                     break;
 
                 case GameLevelState.ChoosingSeeds:
+                    if (_shopOverlay.IsVisible)
+                    {
+                        _shopOverlay.Update(dt);
+                        return;
+                    }
                     _seedChooser.Update(dt);
                     _seedBank.Update(dt);
+                    _shopButton.Update(dt);
                     foreach (var z in _previewZombies) z.Update(dt, _plants);
 
                     if (_seedChooser.IsSelectionFinished)
                     {
                         _seedBank.PopulateSlots(_seedChooser.ChosenPlants, OnSeedCardSelectedFromBank);
-
-                        // ИНИЦИАЛИЗАЦИЯ ПАНOРАМЫ ВЛЕВО (ОБРАТНО К ГЕЙМПЛЕЮ)
                         _currentState = GameLevelState.PanToGameplay;
                         _panTimer = 0f;
                         _panStartX = CAM_X_ZOMBIES;
-
                         Console.WriteLine("[BoardScene] Семена выбраны. Камера плавно возвращается...");
                     }
                     break;
@@ -170,15 +187,8 @@ namespace PVZRemake.Scenes
                     _seedBank.Update(dt);
                     _panTimer += dt;
                     float progressLeft = Math.Clamp(_panTimer / PAN_DURATION, 0f, 1f);
-                    // ИСПОЛЬЗУЕМ ВАШУ ФУНКЦИЮ ДЛЯ ОБРАТНОГО ДВИЖЕНИЯ
-                    _backgroundOffset.X = TodCurveMath.TodCurveEvaluate(
-                        progressLeft,
-                        _panStartX,
-                        CAM_X_GAMEPLAY,
-                        TodCurves.CURVE_EASE_IN_OUT
-                    );
+                    _backgroundOffset.X = TodCurveMath.TodCurveEvaluate(progressLeft, _panStartX, CAM_X_GAMEPLAY, TodCurves.CURVE_EASE_IN_OUT);
 
-                    // Если камера вернулась, включаем отсчет
                     if (progressLeft >= 1f)
                     {
                         _previewZombies.Clear();
@@ -197,15 +207,28 @@ namespace PVZRemake.Scenes
 
                 case GameLevelState.LevelLost:
                     zombies_won.Update(dt);
-                    if (Input.IsMouseButtonPressed(MouseButton.Left)) SceneManager.SwitchScene(new SelectorScreen());
+                    if (Input.IsMouseButtonPressed(MouseButton.Left))
+                    {
+                        this.Destroy(); // Гарантируем зачистку
+                        SceneManager.SwitchScene(new SelectorScreen());
+                    }
                     break;
                 case GameLevelState.LevelWon:
-                    if (Input.IsMouseButtonPressed(MouseButton.Left)) SceneManager.SwitchScene(new SelectorScreen());
+                    if (Input.IsMouseButtonPressed(MouseButton.Left))
+                    {
+                        this.Destroy(); // Гарантируем зачистку
+                        SceneManager.SwitchScene(new SelectorScreen());
+                    }
                     break;
             }
 
-            if (Input.IsKeyDown(Keys.Escape)) SceneManager.SwitchScene(new SelectorScreen());
+            if (Input.IsKeyDown(Keys.Escape))
+            {
+                this.Destroy();
+                SceneManager.SwitchScene(new SelectorScreen());
+            }
         }
+
 
         private void UpdateCountdown(float dt)
         {
@@ -282,11 +305,13 @@ namespace PVZRemake.Scenes
             _waveManager.Update(dt, _zombies.Count);
             _itemManager.Update(dt, _currentState == GameLevelState.ActiveGameplay, isDay, _seedBank, _backgroundOffset);
 
-            // Проверка триггера ПОБЕДЫ уровня
             if (_waveManager.IsLevelFinished && _zombies.Count == 0)
             {
                 _currentState = GameLevelState.LevelWon;
                 Console.WriteLine("[Win] Уровень успешно пройден!");
+
+                // Принудительно вызываем метод фиксации прогресса и монет
+                ApplyLevelResultsAndSave(true);
             }
 
             // Если в руке есть растение — двигаем и плавно анимируем его силуэт под курсором
@@ -394,6 +419,12 @@ namespace PVZRemake.Scenes
         }
         public void Render(SpriteBatch spriteBatch)
         {
+            if (_shopOverlay.IsVisible)
+            {
+                _shopOverlay.Render(spriteBatch);
+                return;
+            }
+
             spriteBatch.Draw(_backgroundTexture, _backgroundOffset, new Vector2(1.5f, 1.5f), 0f, Color4.White);
 
 
@@ -414,6 +445,7 @@ namespace PVZRemake.Scenes
                 // Рисуем интерфейс каталога выбора семян
                 _seedChooser.Render(spriteBatch);
                 _seedBank.Render(spriteBatch);
+                _shopButton.Render(spriteBatch);
             }
             else
             {
@@ -445,8 +477,8 @@ namespace PVZRemake.Scenes
                         entity.Render(spriteBatch, Vector2.Zero);
                     }
                 }
-            
-        
+
+
 
                 _projectileManager.Render(spriteBatch);
                 _particleEffectManager.Render(spriteBatch);
@@ -465,23 +497,33 @@ namespace PVZRemake.Scenes
                 if (_currentState == GameLevelState.Dialogue)
                 {
                     var font = AssetManager.GetFont("Arial", 48);
-                    font?.DrawText(spriteBatch, $"{LawnApp.CurrentUser.Name} House!\n\n(Click to continue)", new Vector2(200f, 650f), Vector2.One, Color4.DarkMagenta);
+                    string playerName = "Player";
+
+                    if (LawnApp.CurrentUser != null)
+                    {
+                        // Загружаем имя из сохраненного профиля, чтобы избежать десинхронизаций списков мета-данных
+                        var metaList = SaveSystem.LoadUsers();
+                        var currentMeta = metaList.FirstOrDefault(u => u.UserId == LawnApp.CurrentUser.UserId);
+                        if (currentMeta != null) playerName = currentMeta.Name ?? "Player";
+                    }
+
+                    font?.DrawText(spriteBatch, $"{playerName} House!\n\n(Click to continue)", new Vector2(200f, 650f), Vector2.One, Color4.White);
                 }
-            }
-            _itemManager.Render(spriteBatch, _backgroundOffset);
-            if (_currentState == GameLevelState.Countdown && _countdownTimer > 0)
-            {
-                set_ready_plant.Render(spriteBatch);
-            }
-            // Экраны завершения уровня
-            if (_currentState == GameLevelState.LevelLost)
-            {
-                zombies_won.Render(spriteBatch);
-            }
-            if (_currentState == GameLevelState.LevelWon)
-            {
-                var font = AssetManager.GetFont("Arial", 48);
-                font?.DrawText(spriteBatch, "LEVEL COMPLETE!", new Vector2(600f, 400f), Vector2.One, Color4.Green);
+                _itemManager.Render(spriteBatch, _backgroundOffset);
+                if (_currentState == GameLevelState.Countdown && _countdownTimer > 0)
+                {
+                    set_ready_plant.Render(spriteBatch);
+                }
+                // Экраны завершения уровня
+                if (_currentState == GameLevelState.LevelLost)
+                {
+                    zombies_won.Render(spriteBatch);
+                }
+                if (_currentState == GameLevelState.LevelWon)
+                {
+                    var font = AssetManager.GetFont("Arial", 48);
+                    font?.DrawText(spriteBatch, "LEVEL COMPLETE!", new Vector2(600f, 400f), Vector2.One, Color4.Green);
+                }
             }
         }
         private bool IsCellOccupied(int row, int col)
@@ -489,15 +531,59 @@ namespace PVZRemake.Scenes
             return _plants.Exists(p => p.Row == row && p.Col == col);
         }
 
+        private void ApplyLevelResultsAndSave(bool isVictory)
+        {
+            if (LawnApp.CurrentUser == null) return;
+
+            int currentUserId = LawnApp.CurrentUser.UserId;
+            UserProfile? activeProfile = SaveSystem.LoadProfile(currentUserId);
+
+            if (activeProfile != null)
+            {
+                // Фиксируем монеты
+                if (_itemManager != null && _itemManager.CollectedLevelCoins > 0)
+                {
+                    activeProfile.Coins += _itemManager.CollectedLevelCoins;
+                    _itemManager.ResetLevelCoins();
+                }
+
+                // Фиксируем прогресс уровня
+                if (isVictory)
+                {
+                    List<string> allLevels = LevelDatabase.GetAllLevelNames();
+                    int currentLevelIndex = allLevels.IndexOf(LevelName);
+
+                    if (currentLevelIndex != -1 && currentLevelIndex == activeProfile.AdventureLevel - 1)
+                    {
+                        activeProfile.AdventureLevel++;
+                        activeProfile.GamesWon++;
+                    }
+                }
+
+                // СИНХРОНИЗАЦИЯ ВРЕМЕНИ ИГРЫ: Переносим накопленное за матч время в сохранение перед записью
+                activeProfile.TotalPlayTime = LawnApp.CurrentUser.TotalPlayTime;
+
+                // Записываем файл user#.dat на диск
+                SaveSystem.SaveProfile(activeProfile);
+
+                // Синхронизируем оперативную память фреймворка
+                LawnApp.CurrentUser.AdventureLevel = activeProfile.AdventureLevel;
+                LawnApp.CurrentUser.Coins = activeProfile.Coins;
+            }
+        }
+
+
         public void Destroy()
         {
+            // Гарантированный сейв собранных монет при любом выходе с уровня (даже досрочном в меню)
+            ApplyLevelResultsAndSave(false);
+
             _plants.Clear();
             _zombies.Clear();
             _projectileManager.Clear();
             _particleEffectManager.Clear();
             CurrentItemManager = null;
             CurrentZombies = null;
-
         }
     }
 }

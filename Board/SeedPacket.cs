@@ -141,7 +141,7 @@ namespace PVZRemake.Board
                 _iconReanim.Render(batch);
             }
             var font = AssetManager.GetFont("BRIANNE_TOD", 18);
-            font?.DrawText(batch, SunCost.ToString(), Position + new Vector2(20f, 90f), Vector2.One, Color4.Black);
+            font?.DrawText(batch, SunCost.ToString(), Position + new Vector2(45f, 90f), Vector2.One, Color4.Black, TextAlignment.Right);
 
             if (CooldownTimer > 0f)
             {

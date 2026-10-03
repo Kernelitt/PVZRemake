@@ -47,7 +47,7 @@ namespace PVZRemake.Board
         {
             // Автоматически регистрируем все уровни в базу данных при старте приложения
             RegisterLevel(new LevelDefinition("1-1", BoardType.Day, [ZombieType.Normal], 4));
-            RegisterLevel(new LevelDefinition("1-2", BoardType.Day, [ZombieType.Normal, ZombieType.Conehead], 8));
+            RegisterLevel(new LevelDefinition("1-2", BoardType.Day, [ZombieType.Normal], 8));
             RegisterLevel(new LevelDefinition("1-3", BoardType.Day, [ZombieType.Normal, ZombieType.Conehead], 10));
             RegisterLevel(new LevelDefinition("1-4", BoardType.Day, [ZombieType.Normal, ZombieType.Conehead], 10));
             RegisterLevel(new LevelDefinition("1-5", BoardType.Day, [ZombieType.Normal, ZombieType.Conehead], 10)); 
@@ -126,7 +126,7 @@ namespace PVZRemake.Board
         /// </summary>
         public static List<string> GetAllLevelNames()
         {
-            return new List<string>(_levels.Keys);
+            return [.. _levels.Keys];
         }
     }
 
@@ -147,20 +147,21 @@ namespace PVZRemake.Board
         public bool IsShowingFlagWarning { get; private set; } = false;
         private float _flagWarningTimer = 0f;
 
+        // ФИКС: Храним изначальный суммарный запас HP текущей волны для точного расчета 50% порога
+        private int _initialWaveTotalHp = 0;
+
         // Делегаты (ивенты) для обратной связи с BoardScene
         public Action<ZombieType, int>? OnSpawnZombie { get; set; }
         public Action? OnFlagWaveWarning { get; set; }
 
-        /// <summary>
-        /// Запускает отсчет уровня (вызывается сразу после завершения SeedChooser)
-        /// </summary>
         public void StartLevel()
         {
             _hasStarted = true;
-            CurrentWaveIndex = -1; // Мы еще не на первой волне, идет интро-задержка
+            CurrentWaveIndex = -1;
             _timeSinceLastWave = 0f;
             _currentWaveCooldown = 15f; // 15 секунд игроку на подготовку
             IsLevelFinished = false;
+            _initialWaveTotalHp = 0;
             Console.WriteLine("[WaveManager] Уровень начался. Идет подготовка к первой волне...");
         }
 
@@ -176,34 +177,33 @@ namespace PVZRemake.Board
 
             _timeSinceLastWave += dt;
 
-            // Условие перехода к СЛЕДУЮЩЕЙ волне
+            // Условие перехода по тайм-ауту
             bool isTimeout = _timeSinceLastWave >= _currentWaveCooldown;
 
-            // ФИКС: Условие досрочного вызова волны по уровню здоровья (меньше 50% общего ХП)
+            // ИСПРАВЛЕНО: Стабильный расчет условия 50% здоровья текущей волны
             bool isHpConditionMet = false;
-            if (CurrentWaveIndex >= 0 && _timeSinceLastWave > 5f)
+            if (CurrentWaveIndex >= 0 && _timeSinceLastWave > 4f)
             {
                 var activeZombies = BoardScene.CurrentZombies;
                 if (activeZombies == null || activeZombies.Count == 0)
                 {
-                    isHpConditionMet = true; // Если вообще никого нет — условие выполнено
+                    isHpConditionMet = true; // На поле никого нет — сразу пускаем следующую волну
                 }
                 else
                 {
                     int totalCurrentHp = 0;
-                    int totalMaxHp = 0;
 
                     foreach (var zombie in activeZombies)
                     {
                         if (!zombie.IsDead && zombie.State != ZombieState.Dying)
                         {
-                            totalCurrentHp += zombie.Health + zombie.ArmorHealth;
-                            totalMaxHp += zombie.MaxHealth;
+                            // Считаем текущее здоровье зомби вместе с его броней
+                            totalCurrentHp += (int)(zombie.Health + zombie.ArmorHealth);
                         }
                     }
 
-                    // Если общее оставшееся здоровье упало ниже 50% от максимального
-                    if (totalMaxHp > 0 && ((float)totalCurrentHp / totalMaxHp) < 0.5f)
+                    // Если суммарное здоровье упало ниже половины от стартового здоровья этой волны
+                    if (_initialWaveTotalHp > 0 && ((float)totalCurrentHp / _initialWaveTotalHp) < 0.5f)
                     {
                         isHpConditionMet = true;
                     }
@@ -225,10 +225,9 @@ namespace PVZRemake.Board
                 CurrentWaveIndex = nextWaveIndex;
                 _timeSinceLastWave = 0f;
 
-                // ФИКС: Если это финал или флаг, ставим кулдаун побольше, для обычных — 30 сек
-                _currentWaveCooldown = ((CurrentWaveIndex + 1) % 10 == 0) ? 40f : 30f;
+                // Если это финал или флаг (каждая 10-я волна), даем игроку больше времени
+                _currentWaveCooldown = ((CurrentWaveIndex + 1) % 10 == 0) ? 45f : 30f;
 
-                // Проверяем, большая ли это волна (каждая 10-я волна)
                 bool isFlagWave = (CurrentWaveIndex + 1) % 10 == 0;
                 if (isFlagWave)
                 {
@@ -238,6 +237,9 @@ namespace PVZRemake.Board
                 }
 
                 GenerateAndSpawnWave(isFlagWave);
+
+                // ИСПРАВЛЕНО: Сразу после спавна волны фиксируем её суммарное начальное здоровье для проверки в Update
+                CalculateInitialWaveHp();
             }
             else
             {
@@ -249,48 +251,62 @@ namespace PVZRemake.Board
         }
 
         /// <summary>
-        /// Исправленный математический алгоритм закупки волны
+        /// Подсчитывает общее стартовое здоровье всех заспавненных зомби
+        /// </summary>
+        private void CalculateInitialWaveHp()
+        {
+            _initialWaveTotalHp = 0;
+            var activeZombies = BoardScene.CurrentZombies;
+            if (activeZombies == null) return;
+
+            foreach (var zombie in activeZombies)
+            {
+                if (!zombie.IsDead && zombie.State != ZombieState.Dying)
+                {
+                    // Учитываем начальное здоровье зомби + здоровье его брони (конуса/ведра)
+                    _initialWaveTotalHp += zombie.MaxHealth + zombie.MaxArmorHealth;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Исправленный сбалансированный алгоритм закупки волны
         /// </summary>
         private void GenerateAndSpawnWave(bool isFlagWave)
         {
-            // ФИКС: Гарантируем, что бюджет никогда не будет равен 0 на первых волнах уровня (Math.Max(1, ...))
-            int rawBudget = 1 + (int)(CurrentWaveIndex * _levelDef.WavePointsMultiplier / _levelDef.WavePointsGainSpeed);
-            int budget = Math.Max(1, rawBudget);
-
             int currentWaveNumber = CurrentWaveIndex + 1;
 
-            Console.WriteLine($"[WaveManager] Генерация волны {currentWaveNumber}. Бюджет очков: {budget}");
+            // Расчет бюджета очков
+            int budget = (int)(1 + (currentWaveNumber * (_levelDef.WavePointsMultiplier / _levelDef.WavePointsGainSpeed)));
+            if (isFlagWave) budget = (int)(budget * 2.5f);
+            budget = Math.Max(1, budget);
 
-            // Если это флаг-волна, принудительно спавним Флагоносца (он идет вне бюджета)
-            if (isFlagWave)
-            {
-                SpawnSingleZombie(ZombieType.Normal); // Переключите на FlagZombie, когда добавите
-            }
-
+            if (isFlagWave) SpawnSingleZombie(ZombieType.Flag);
+           
             List<ZombieDef> allowedPool = [];
             ZombieDef? cheapestZombie = null;
 
             foreach (var type in _levelDef.AllowedZombies)
             {
                 ZombieDef? def = ZombieDatabase.Get(type);
-                if (def != null && currentWaveNumber >= def.StartingWave)
+                if (def == null) continue;
+
+                if (currentWaveNumber >= def.StartingWave)
                 {
                     allowedPool.Add(def);
 
-                    // Попутно ищем самого дешевого зомби на уровне для аварийного спавна
-                    if (cheapestZombie == null || def.Points < cheapestZombie.Points)
-                    {
-                        cheapestZombie = def;
-                    }
+                    if (cheapestZombie == null || def.Points < cheapestZombie.Points) cheapestZombie = def;     
                 }
             }
 
             if (allowedPool.Count == 0) return;
+            
 
             bool spawnedAtLeastOne = false;
             int safetyCounter = 0;
+            int initialBudget = budget;
 
-            while (budget > 0 && safetyCounter < 500)
+            while (budget > 0 && safetyCounter < 10000)
             {
                 safetyCounter++;
 
@@ -306,14 +322,10 @@ namespace PVZRemake.Board
                     }
                 }
 
-                // ФИКС: Если бюджет остался, но мы не можем себе позволить дорогих зомби, 
-                // и при этом за весь цикл еще никто не заспавнился — насильно тратим остаток на самого дешевого!
                 if (affordableZombies.Count == 0 || totalWeight == 0)
                 {
-                    if (!spawnedAtLeastOne && cheapestZombie != null)
-                    {
-                        SpawnSingleZombie(cheapestZombie.Type);
-                    }
+                    if (!spawnedAtLeastOne && cheapestZombie != null) SpawnSingleZombie(cheapestZombie.Type);
+                    
                     break;
                 }
 
@@ -339,12 +351,19 @@ namespace PVZRemake.Board
                 }
             }
         }
-        private void SpawnSingleZombie(ZombieType type) { int randomRow = Random.Shared.Next(0, Grid.TotalRows); OnSpawnZombie?.Invoke(type, randomRow); }
-        public float GetLevelProgress() 
-        { 
-            if (TotalWaves == 0) return 0f; 
-            if (CurrentWaveIndex < 0) return 0f; 
 
-            return (float)(CurrentWaveIndex + 1) / TotalWaves; }
+        private void SpawnSingleZombie(ZombieType type)
+        {
+            int randomRow = Random.Shared.Next(0, Grid.TotalRows);
+            OnSpawnZombie?.Invoke(type, randomRow);
+        }
+
+        public float GetLevelProgress()
+        {
+            if (TotalWaves == 0) return 0f;
+            if (CurrentWaveIndex < 0) return 0f;
+            return (float)(CurrentWaveIndex + 1) / TotalWaves;
+        }
     }
+
 }

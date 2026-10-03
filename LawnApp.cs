@@ -14,7 +14,8 @@ public class LawnApp(GameWindowSettings gameWindowSettings, NativeWindowSettings
     public AssetGroup mainLawnGroup;
 
     public SpriteBatch _spriteBatch;
-    public static UserMetaEntry CurrentUser { get; private set; }
+    public static UserMetaEntry CurrentUsers { get; set; }
+    public static UserProfile? CurrentUser { get; set; }
     public static LawnApp App { get; private set; }
 
     protected override void OnLoad()
@@ -30,9 +31,29 @@ public class LawnApp(GameWindowSettings gameWindowSettings, NativeWindowSettings
         var users = SaveSystem.LoadUsers();
         if (users.Count == 0) SaveSystem.SaveProfile( SaveSystem.CreateNewProfile("Player"));
 
-        CurrentUser = users[0];
-
+        CurrentUsers = users[0];
+        CurrentUser = SaveSystem.LoadProfile(users[0].UserId);
         _spriteBatch = new SpriteBatch();
+
+        bool isRelease = true; // Выставьте в false, если хотите читать из обычных папок
+
+        if (isRelease)
+        {
+            // Имя вашего файла-архива. Расширение может быть любым (.pkg, .zip, .dat)
+            string archiveName = "main_content.pkg";
+
+            // Задаем корень поиска внутри архива (если файлы лежат в подпапке)
+            AssetManager.RootPath = "";
+
+            // Включаем архивный движок
+            AssetManager.InitializeZipArchive(archiveName);
+        }
+        else
+        {
+            // Старый режим чтения папок с диска
+            AssetManager.RootPath = "";
+        }
+
         mainLawnGroup = AssetManager.CreateGroup("LawnContext", atlasSize: 4096*4, layersPerPage: 4);
         AssetManager.Active = mainLawnGroup;
 

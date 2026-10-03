@@ -6,10 +6,11 @@ namespace PVZRemake.Board
 {
     public enum ProjectileType
     {
-        Pea,         // Обычный горох (наносит базовый урон)
-        SnowPea,     // Замораживающий горох (наносит урон + замедляет скорость зомби)
-        Cabbage,     // Капуста (для крыши, летит по параболе)
-        Melon        // Арбуз (тяжелый навесной урон по области)
+        Pea,         
+        SnowPea,     
+        Puff,
+        Cabbage,     
+        Melon        
     }
     public class ProjectileManager
     {
@@ -79,6 +80,11 @@ namespace PVZRemake.Board
             if (type == ProjectileType.SnowPea)
             {
                 textureKey = "IMAGE_REANIM_PROJECTILESNOWPEA";
+                Damage = 20;
+            }
+            else if (type == ProjectileType.Puff)
+            {
+                textureKey = "IMAGE_PUFFSHROOM_PUFF2";
                 Damage = 20;
             }
 
@@ -155,9 +161,13 @@ namespace PVZRemake.Board
             else if (Type == ProjectileType.SnowPea)
             {
                 // На будущее, если у вас будет ледяной всплеск
-                particleManager.SpawnEffect("SnowPeaSplat", Position);
+                particleManager.SpawnEffect("PARTICLE_SNOWPEASPLAT", Position);
             }
-
+            else if (Type == ProjectileType.Puff)
+            {
+                // На будущее, если у вас будет ледяной всплеск
+                particleManager.SpawnEffect("PARTICLE_PUFFSPLAT", Position);
+            }
 
             Console.WriteLine($"[Projectile] Попадание! Снаряд {Type} поразил зомби на линии {Row}.");
             Destroy();

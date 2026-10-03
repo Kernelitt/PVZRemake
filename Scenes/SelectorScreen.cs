@@ -55,7 +55,7 @@ namespace PVZRemake.Scenes
         {
             TextureIdle = (TextureRegion)AssetManager.GetTexture("IMAGE_REANIM_SELECTORSCREEN_WOODSIGN2"),
             TextureHover = (TextureRegion)AssetManager.GetTexture("IMAGE_REANIM_SELECTORSCREEN_WOODSIGN2_PRESS"),
-            Position = new Vector2(239, 194),
+            Position = new Vector2(239, 184),
             Size = new Vector2(436, 106),
         };
 
@@ -135,7 +135,7 @@ namespace PVZRemake.Scenes
             }
             else
             {
-                CurrentUser = SaveSystem.CreateNewProfile("Дэйв");
+                CurrentUser = SaveSystem.CreateNewProfile("Browncoat");
                 RefreshCachedUsersList();
             }
 
@@ -154,6 +154,7 @@ namespace PVZRemake.Scenes
 
         private void InitializeProfileDialogComponents()
         {
+            // ИСПРАВЛЕНО: Координаты кнопок жестко наследуют динамическую позицию родительского диалогового окна!
             NewUserButton = new UI3PartButton(standardButtonSkin, UsersSettings.Position + new Vector2(40, 520), 220)
             {
                 OnClick = () => { OpenCreateUserModal(); }
@@ -178,6 +179,7 @@ namespace PVZRemake.Scenes
                 OnClick = () => { UsersSettings.IsVisible = false; }
             };
         }
+
 
         private void InitializeCreateUserComponents()
         {
@@ -210,6 +212,10 @@ namespace PVZRemake.Scenes
                         CurrentUser = newProfile;
                         _isCreateUserWindowVisible = false;
                         RefreshCachedUsersList();
+
+                        // ДОБАВИТЬ СТРОКУ НИЖЕ: Синхронизируем мета-данные фреймворка с только что созданным юзером (он автоматически встал на 0 место)
+                        if (_cachedUsers.Count > 0) LawnApp.CurrentUsers = _cachedUsers[0];
+
                         RefreshProfileList();
                     }
                 }
@@ -313,23 +319,63 @@ namespace PVZRemake.Scenes
         {
             RefreshCachedUsersList();
             _profileSelectButtons.Clear();
-            float startY = UsersSettings.Position.Y + 110;
+
+            if (_cachedUsers.Count >= 5)
+            {
+                NewUserButton.IsEnabled = false;
+                NewUserButton.IsVisible = false;
+            }
+            else
+            {
+                NewUserButton.IsEnabled = true;
+                NewUserButton.IsVisible = true;
+            }
+
+            float startY = UsersSettings.Position.Y + 120;
             float startX = UsersSettings.Position.X + 50;
+
             for (int i = 0; i < _cachedUsers.Count; i++)
             {
                 var userMeta = _cachedUsers[i];
-                Vector2 btnPos = new(startX, startY + (i * 45));
+                Vector2 btnPos = new(startX, startY + (i * 65));
+
                 var profileBtn = new UI3PartButton(standardButtonSkin, btnPos, 700)
                 {
                     OnClick = () =>
                     {
-                        CurrentUser = SaveSystem.LoadProfile(userMeta.UserId);
+                        // 1. ГЛУБОКАЯ ЗАГРУЗКА: Читаем чистый профиль нового игрока с диска (все PurchasedItems, слоты и ХП)
+                        UserProfile? freshlyLoadedProfile = SaveSystem.LoadProfile(userMeta.UserId);
+
+                        if (freshlyLoadedProfile == null)
+                        {
+                            Console.WriteLine($"[Profile Error] Не удалось загрузить файл user{userMeta.UserId}.dat");
+                            return;
+                        }
+
+                        // 2. Назначаем его текущим активным игроком везде — и в сцене, и в глобальном фреймворке
+                        this.CurrentUser = freshlyLoadedProfile;
+                        LawnApp.CurrentUser = freshlyLoadedProfile; // <--- ТЕПЕРЬ СЮДА ПЕРЕДАЕТСЯ ВЕСЬ ПРОФИЛЬ, А НЕ КОРОТКАЯ МЕТА!
+
+                        // 3. Ротируем список users.dat, чтобы этот игрок стал первым на запуск (индекс 0)
+                        var allUsersList = SaveSystem.LoadUsers().ToList();
+                        var selectedEntry = allUsersList.FirstOrDefault(u => u.UserId == userMeta.UserId);
+                        if (selectedEntry != null)
+                        {
+                            allUsersList.Remove(selectedEntry);
+                            allUsersList.Insert(0, selectedEntry);
+                            SaveSystem.SaveUsers(allUsersList);
+                        }
+
+
                         UsersSettings.IsVisible = false;
+                        Console.WriteLine($"[Profile System] Успешно загружен профиль: {freshlyLoadedProfile.UserId} ({userMeta.Name}). Кошелек: {freshlyLoadedProfile.Coins}$. Слотов: {freshlyLoadedProfile.AdventureLevel}. Кэш памяти очищен.");
                     }
                 };
                 _profileSelectButtons.Add(profileBtn);
             }
         }
+
+
         public void Update(float dt)
         {
             if (_background == null) return;
@@ -355,15 +401,36 @@ namespace PVZRemake.Scenes
             if (_isCreateUserWindowVisible)
             {
                 CreateUserWindow.Update(dt);
+
+                // ДИНАМИЧЕСКИЙ СДВИГ: Привязываем элементы ввода к текущей позиции модалки в реальном времени
+                _userNameInput.Position = CreateUserWindow.Position + new Vector2(50, 130);
+                _confirmCreateButton.Position = CreateUserWindow.Position + new Vector2(40, 230);
+                _cancelCreateButton.Position = CreateUserWindow.Position + new Vector2(280, 230);
+
                 _userNameInput.Update(dt);
                 _confirmCreateButton.Update(dt);
                 _cancelCreateButton.Update(dt);
                 return;
             }
+
             // ПРИОР ИЕРАРХИЯ ОБНОВЛЕНИЯ 3: Окно настроек списка профилей
             if (UsersSettings.IsVisible)
             {
                 UsersSettings.Update(dt);
+
+                // ДИНАМИЧЕСКИЙ СДВИГ: Привязываем нижние кнопки управления к позиции окна
+                NewUserButton.Position = UsersSettings.Position + new Vector2(40, 520);
+                DeleteUserButton.Position = UsersSettings.Position + new Vector2(280, 520);
+                CloseUsersDialogButton.Position = UsersSettings.Position + new Vector2(540, 520);
+
+                // Постоянно сдвигаем кнопки строк профилей, если окно движется
+                float startY = UsersSettings.Position.Y + 120;
+                float startX = UsersSettings.Position.X + 50;
+                for (int i = 0; i < _profileSelectButtons.Count; i++)
+                {
+                    _profileSelectButtons[i].Position = new Vector2(startX, startY + (i * 65));
+                }
+
                 NewUserButton.Update(dt);
                 DeleteUserButton.Update(dt);
                 CloseUsersDialogButton.Update(dt);
@@ -446,23 +513,30 @@ namespace PVZRemake.Scenes
             // НАЛОЖЕНИЕ ВЕРХНЕГО СЛОЯ: Экран выбора уровней (рисуется поверх всего остального)
             if (_isLevelSelectVisible)
             {
-                // 1. Рисуем фон меню выбора уровней (растягиваем на весь виртуальный экран 1600x900)
                 if (_levelMenuBg.AtlasTextureHandle != 0)
                 {
                     spriteBatch.Draw(_levelMenuBg, Vector2.Zero, new Vector2(1600f / _levelMenuBg.Width, 900f / _levelMenuBg.Height), 0f, Color4.White);
                 }
-                // 2. Отрисовка заголовка меню
+
                 _menuFont?.DrawText(spriteBatch, "ADVENTURE", new Vector2(800, 70), new Vector2(2f, 2f), Color4.LightGray, TextAlignment.Center);
-                // 3. Рисуем сетку кнопок выбора уровней
+
+                // Выясняем максимальный уровень приключения текущего игрока
+                int maxAllowedLevel = CurrentUser != null ? CurrentUser.AdventureLevel : 1;
+
                 for (int i = 0; i < _levelButtons.Count; i++)
                 {
                     var btn = _levelButtons[i];
+
+                    // ПРОВЕРКА ДОСТУПНОСТИ УРОВНЯ:
+                    // Если индекс кнопки (0..49) больше или равен maxAllowedLevel, уровень считается заблокированным
+                    bool isLevelLocked = i >= maxAllowedLevel;
+
+                    // Отключаем кликабельность кнопки, если уровень закрыт
+                    btn.IsEnabled = !isLevelLocked;
                     btn.Render(spriteBatch);
 
-                    // 1. Получаем полную конфигурацию уровня из нашей базы данных структур
                     var levelConfig = LevelDatabase.GetLevelConfig(_levelNames[i]);
 
-                    // 2. Парсим строку имени (например, из "1-10" получаем локацию 1 и уровень 10)
                     int levelNumber = 1;
                     string[] parts = levelConfig.LevelName.Split('-');
                     if (parts.Length == 2 && int.TryParse(parts[1], out int parsedNumber))
@@ -470,8 +544,6 @@ namespace PVZRemake.Scenes
                         levelNumber = parsedNumber;
                     }
 
-                    // 3. Вычисляем базовый индекс иконки в атласе на основе типа локации (BoardType)
-                    // Индексы соответствуют порядку локаций в оригинальном атласе Survival Thumbnails
                     int thumbIndex = levelConfig.BoardType switch
                     {
                         BoardType.Day => 0,
@@ -482,36 +554,37 @@ namespace PVZRemake.Scenes
                         _ => 0
                     };
 
-                    // 4. МАТЕМАТИЧЕСКИЙ СДВИГ ДЛЯ ФИНАЛЬНОГО УРОВНЯ ЛОКАЦИИ
-                    // Если это 10-й уровень в локации (например, 1-10, 2-10 и т.д.), 
-                    // смещаем индекс на +5, чтобы отобразить "продвинутую/финальную" иконку
                     if (levelNumber == 10)
                     {
                         thumbIndex += 5;
                     }
 
-                    // Защита от выхода за границы массива нарезанных текстур
                     thumbIndex = Math.Clamp(thumbIndex, 0, _levelThumbnails.Count - 1);
 
-                    // 5. Отрисовываем правильную миниатюру локации
                     if (_levelThumbnails.Count > 0 && _levelThumbnails[thumbIndex].AtlasTextureHandle != 0)
                     {
                         var thumb = _levelThumbnails[thumbIndex];
-
-                        // Центрируем иконку внутри плашки кнопки уровня по вашим координатам
                         Vector2 thumbSize = new(84, 62);
                         Vector2 thumbPos = btn.Position + new Vector2((btn.Size.X - thumbSize.X) * 0.448f, 7f);
                         Vector2 thumbScale = new(thumbSize.X / thumb.Width, thumbSize.Y / thumb.Height);
 
-                        spriteBatch.Draw(thumb, thumbPos, thumbScale, 0f, Color4.White);
+                        // Если уровень закрыт, рисуем миниатюру локации притемненной наполовину
+                        Color4 thumbColor = isLevelLocked ? new Color4(0.3f, 0.3f, 0.3f, 1f) : Color4.White;
+                        spriteBatch.Draw(thumb, thumbPos, thumbScale, 0f, thumbColor);
                     }
 
-                    // Подписываем название уровня в самом низу плашки кнопки
+                    // Текст номера уровня
                     Vector2 textPos = new Vector2(btn.Position.X + btn.Size.X * 0.5f, btn.Position.Y + btn.Size.Y - 32f);
-                    _menuFont?.DrawText(spriteBatch, _levelNames[i], textPos, Vector2.One, Color4.White, TextAlignment.Center);
+                    Color4 textColor = isLevelLocked ? Color4.Gray : Color4.White;
+                    _menuFont?.DrawText(spriteBatch, _levelNames[i], textPos, Vector2.One, textColor, TextAlignment.Center);
+
+                    // Если уровень закрыт, можно нарисовать маленький замочек поверх плашки (необязательно, по желанию)
+                    if (isLevelLocked)
+                    {
+                        _menuFont?.DrawText(spriteBatch, "LOCKED", btn.Position + new Vector2(btn.Size.X * 0.5f, 40f), new Vector2(0.8f, 0.8f), Color4.Red, TextAlignment.Center);
+                    }
                 }
 
-                // 4. Отрисовка кнопки выхода из меню выбора уровней
                 _closeLevelMenuButton.Render(spriteBatch);
                 _menuFont?.DrawText(spriteBatch, "Back", _closeLevelMenuButton.Position + new Vector2(_closeLevelMenuButton.Size.X * 0.5f, 10f), Vector2.One, Color4.DeepSkyBlue, TextAlignment.Center);
             }

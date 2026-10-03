@@ -13,7 +13,7 @@ namespace PVZRemake.Board
         public float X => Position.X;
         public Vector2 Position { get; set; }
 
-        public int Health { get; protected set; }
+        public float Health { get; protected set; }
         public int MaxHealth { get; protected set; }
         public int ArmorHealth { get; protected set; }
         public int MaxArmorHealth { get; protected set; }
@@ -94,10 +94,15 @@ namespace PVZRemake.Board
 
             ZombieAnim?.Update(dt);
 
+            if (Health <= 70)
+            {
+                Health -= 70 * dt;
+            }
+
+
             switch (State)
             {
                 case ZombieState.Idle:
-                    // Просто стоит и дышит
                     break;
 
                 case ZombieState.Walking:
@@ -147,10 +152,7 @@ namespace PVZRemake.Board
 
             ZombieAnim?.Position = Position;
 
-            if (Health <= 100)
-            {
-                Health--;
-            }
+
         }
 
         public virtual void Render(SpriteBatch batch, Vector2? camera_offset)
@@ -163,7 +165,7 @@ namespace PVZRemake.Board
             }
         }
 
-        public virtual void TakeDamage(int damage)
+        public virtual void TakeDamage(int damage, PlantDamageType? damageType = PlantDamageType.Default)
         {
             if (State == ZombieState.Dying || IsDead) return;
 
@@ -189,6 +191,28 @@ namespace PVZRemake.Board
 
             Health -= damage;
 
+            if (Health <= 0)
+            {
+                Health = 0;
+                if (damageType == PlantDamageType.Default) { StartDeathAnimation(); }
+                else if (damageType == PlantDamageType.Explosion)
+                {
+                    ZombieAnim = ReanimDatabase.CreateRuntimeAnimation("ZOMBIE_CHARRED");
+                    ZombieAnim.LoopType = ReanimLoopType.PlayOnce;
+                    ZombieAnim.SetFrameBounds(0, 42);
+                    ZombieAnim._animTime = (float)Random.Shared.NextDouble() / 20;               
+                    ZombieAnim.Scale = new Vector2(1.5f, 1.5f);
+                    SetState(ZombieState.Dying, false);
+                    return;
+                }
+                else if (damageType == PlantDamageType.Instant)
+                {
+                    ZombieAnim.LoopType = ReanimLoopType.PlayOnce;
+                    ZombieAnim._animTime = 1f;
+                    SetState(ZombieState.Dying);
+                    return;
+                }
+            }
             // Потеря руки при здоровье <= 135 (50% ХП)
             if (Health <= 170 && !_hasDroppedArm)
             {
@@ -202,7 +226,6 @@ namespace PVZRemake.Board
                 BoardScene.CurrentParticleManager?.SpawnEffect("PARTICLE_ZOMBIEARM", particlePos);
             }
 
-            // Критический урон: отлетает голова
             if (Health <= 70 && !_hasDroppedHead)
             {
                 _hasDroppedHead = true;
@@ -213,12 +236,6 @@ namespace PVZRemake.Board
                 // Спавним частицу отлетающей головы
                 Vector2 particlePos = Position + new Vector2(10f, 0f);
                 BoardScene.CurrentParticleManager?.SpawnEffect("PARTICLE_ZOMBIEHEAD", particlePos);
-            }
-
-            if (Health <= 0)
-            {
-                Health = 0;
-                StartDeathAnimation();
             }
         }
 
@@ -237,11 +254,11 @@ namespace PVZRemake.Board
             SetState(ZombieState.Dying);
         }
 
-        public void SetState(ZombieState newState)
+        public void SetState(ZombieState newState, bool? needToUpdate = true)
         {
             if (State == newState || State == ZombieState.Dead) return;
             State = newState;
-            UpdateAnimState();
+            if ((bool)needToUpdate) UpdateAnimState();
         }
 
         protected virtual void UpdateAnimState()
@@ -305,6 +322,7 @@ namespace PVZRemake.Board
             switch (type)
             {
                 case ZombieType.Normal:
+                case ZombieType.Flag:
                     zombie = new Zombie(ZombieType.Normal, row, startX);
                     break;
                 case ZombieType.Conehead:
@@ -325,9 +343,9 @@ namespace PVZRemake.Board
 
     public class ConeheadZombie : Zombie
     {
+        public const int MaxArmorHealth = 370;
         public ConeheadZombie(int row, float startX) : base(ZombieType.Conehead, row, startX)
         {
-            // Обычный зомби (270) + Конус (370) = 640 здоровья всего
             ArmorHealth = 370;
         }
 
@@ -340,10 +358,26 @@ namespace PVZRemake.Board
             bool showCone = ArmorHealth > 0;
             ZombieAnim.SetTrackVisible("anim_cone", showCone);
         }
+
+        protected override void UpdateArmorDamageStage()
+        {
+            if (ZombieAnim == null) return;
+
+            if (ArmorHealth < MaxArmorHealth * 0.33)
+            {
+                ZombieAnim.OverrideTrackImage("IMAGE_REANIM_ZOMBIE_CONE1", "IMAGE_REANIM_ZOMBIE_CONE3");
+                ZombieAnim.OverrideTrackImage("IMAGE_REANIM_ZOMBIE_CONE2", "IMAGE_REANIM_ZOMBIE_CONE3");
+            }
+            else if (ArmorHealth < MaxArmorHealth * 0.67)
+            {
+                ZombieAnim.OverrideTrackImage("IMAGE_REANIM_ZOMBIE_CONE1", "IMAGE_REANIM_ZOMBIE_CONE2");
+            }
+        }
     }
 
     public class BucketheadZombie : Zombie
     {
+        public const int MaxArmorHealth = 370;
         public BucketheadZombie(int row, float startX) : base(ZombieType.Buckethead, row, startX)
         {
             // Обычный зомби (270) + Ведро (1100) = 1370 здоровья всего

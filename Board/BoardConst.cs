@@ -12,6 +12,13 @@ namespace PVZRemake.Board
         Fog,        
         Roof        
     }
+
+    public enum PlantDamageType
+    {
+        Default,
+        Explosion,
+        Instant
+    }
     public enum GameLevelState
     {
         Dialogue,            
@@ -51,6 +58,7 @@ namespace PVZRemake.Board
     public enum ZombieType
     {
         Normal,
+        Flag,
         Conehead,
         Buckethead,
         ScreenDoor
@@ -224,12 +232,11 @@ namespace PVZRemake.Board
         {
             // Переносим точные оригинальные параметры из структуры PopCap
             Add(new ZombieDef(ZombieType.Normal, 1, 1, 4000, "ZOMBIE"));
-            Add(new ZombieDef(ZombieType.Conehead, 2, 1, 4000, "CONEHEAD_ZOMBIE")); // В вашей таблице это ZOMBIE_TRAFFIC_CONE, StartingWave = 1
-            Add(new ZombieDef(ZombieType.Buckethead, 4, 1, 3000, "BUCKETHEAD_ZOMBIE")); // ZOMBIE_PAIL, StartingWave = 1
-            Add(new ZombieDef(ZombieType.ScreenDoor, 4, 5, 3500, "SCREEN_DOOR_ZOMBIE")); // ZOMBIE_DOOR, StartingWave = 5
+            Add(new ZombieDef(ZombieType.Flag, 1, 1, 0, "FLAG_ZOMBIE"));
+            Add(new ZombieDef(ZombieType.Conehead, 2, 1, 4000, "CONEHEAD_ZOMBIE")); 
+            Add(new ZombieDef(ZombieType.Buckethead, 4, 1, 3000, "BUCKETHEAD_ZOMBIE")); 
+            Add(new ZombieDef(ZombieType.ScreenDoor, 4, 5, 3500, "SCREEN_DOOR_ZOMBIE")); 
 
-            // Заглушка для флагового зомби (он идет вне бюджета, жестко по триггеру)
-            Add(new ZombieDef(ZombieType.Normal, 1, 1, 0, "FLAG_ZOMBIE"));
         }
 
         private static void Add(ZombieDef def) => _defs[def.Type] = def;

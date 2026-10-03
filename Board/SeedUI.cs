@@ -112,55 +112,52 @@ namespace PVZRemake.Board
         public Vector2 BasePosition { get; set; } = new Vector2(0f, 950f); // Целевая позиция окна
         public Vector2 CurrentPosition { get; private set; }
 
-        public SeedChooser()
+        public static int MaxAllowedSlots
         {
-            _bgCatalog = (TextureRegion)AssetManager.GetTexture("IMAGE_REANIM_SEEDCHOOSER_BACKGROUND");
+            get
+            {
+                if (LawnApp.CurrentUser == null) return 6;
 
-            // ДОБАВЛЕНЫ ВСЕ НОВЫЕ РАСТЕНИЯ ИЗ ТАБЛИЦЫ
-            // Исключаем системные/технические (Imitater, ExplodeONut, GiantWallNut, Sprout, LeftPeater),
-            // оставляя основные 40 классических растений из уровней и 8 улучшений (всего 48 штук)
-            var allAvailable = new[]
-            { 
-            // День
+                UserProfile? profile = SaveSystem.LoadProfile(LawnApp.CurrentUser.UserId);
+                if (profile == null) return 6;
+
+                // Считаем базовые 6 слотов + купленные апгрейды
+                int slots = 6;
+                if (profile.PurchasedItems.Contains("SeedSlot7")) slots = 7;
+                if (profile.PurchasedItems.Contains("SeedSlot8")) slots = 8;
+                if (profile.PurchasedItems.Contains("SeedSlot9")) slots = 9;
+                if (profile.PurchasedItems.Contains("SeedSlot10")) slots = 10;
+                return slots;
+            }
+        }
+
+        // Массив всех основных 48 растений в порядке их отображения на сетке каталога
+        private readonly PlantType[] _allAvailablePlants = new[]
+        { 
+            // День (1-1 .. 1-8)
             PlantType.Peashooter, PlantType.Sunflower, PlantType.CherryBomb, PlantType.WallNut,
             PlantType.PotatoMine, PlantType.SnowPea, PlantType.Chomper, PlantType.Repeater,
-            // Ночь
+            // Ночь (2-1 .. 2-8)
             PlantType.PuffShroom, PlantType.SunShroom, PlantType.FumeShroom, PlantType.GraveBuster,
             PlantType.HypnoShroom, PlantType.ScaredyShroom, PlantType.IceShroom, PlantType.DoomShroom,
-            // Бассейн
+            // Бассейн (3-1 .. 3-8)
             PlantType.LilyPad, PlantType.Squash, PlantType.Threepeater, PlantType.TangleKelp,
             PlantType.Jalapeno, PlantType.Spikeweed, PlantType.Torchwood, PlantType.TallNut,
-            // Туман
+            // Туман (4-1 .. 4-8)
             PlantType.SeaShroom, PlantType.Plantern, PlantType.Cactus, PlantType.Blover,
             PlantType.SplitPea, PlantType.Starfruit, PlantType.PumpkinShell, PlantType.MagnetShroom,
-            // Крыша
+            // Крыша (5-1 .. 5-8)
             PlantType.CabbagePult, PlantType.FlowerPot, PlantType.KernelPult, PlantType.InstantCoffee,
             PlantType.Garlic, PlantType.Umbrella, PlantType.Marigold, PlantType.MelonPult,
-            // Улучшения
+            // Улучшения (заблокированы до конца приключения или покупаются)
             PlantType.GatlingPea, PlantType.TwinSunflower, PlantType.GloomShroom, PlantType.Cattail,
             PlantType.WinterMelon, PlantType.GoldMagnet, PlantType.SpikeRock, PlantType.CobCannon
         };
 
-            // Настраиваем сетку: 8 колонок на 6 строк идеально вмещают 48 основных растений
-            float startX = 13f;
-            float startY = 120f;
-            float spacingX = 90f;
-            float spacingY = 125f;
-            int cols = 8;
+        public SeedChooser()
+        {
+            _bgCatalog = (TextureRegion)AssetManager.GetTexture("IMAGE_REANIM_SEEDCHOOSER_BACKGROUND");
 
-            for (int i = 0; i < allAvailable.Length; i++)
-            {
-                int r = i / cols;
-                int c = i % cols;
-                Vector2 pos = new(startX + (c * spacingX), startY + (r * spacingY));
-
-                var card = new SeedCard(allAvailable[i], pos)
-                {
-                    OnSelected = OnCatalogCardClicked
-                };
-                _catalogCards.Add(card);
-            }
-            
             // Кнопка "Let's Rock!" / "Поехали!"
             _btnStartGame = new UIButton
             {
@@ -174,23 +171,6 @@ namespace PVZRemake.Board
             };
         }
 
-        private void OnCatalogCardClicked(SeedCard clickedCard)
-        {
-            if (_chosenCards.Contains(clickedCard.PlantType))
-            {
-                // Если уже выбрана — убираем из списка (девыбор)
-                _chosenCards.Remove(clickedCard.PlantType);
-            }
-            else
-            {
-                // Ограничение банка (максимум 6 карт на старте игры)
-                if (_chosenCards.Count < 6)
-                {
-                    _chosenCards.Add(clickedCard.PlantType);
-                }
-            }
-        }
-
         public void StartAppearanceAnimation()
         {
             _appearanceTimer = 0f;
@@ -198,6 +178,52 @@ namespace PVZRemake.Board
             IsSelectionFinished = false;
             _chosenCards.Clear(); // Очищаем старый выбор перед новой игрой
             CurrentPosition = new Vector2(BasePosition.X, 950f); // Стартуем под нижним краем экрана
+
+            // ДИНАМИЧЕСКОЕ ПЕРЕСТРОЕНИЕ КАТАЛОГА ПОД УРОВЕНЬ ИГРОКА:
+            _chosenCards.Clear();
+            _catalogCards.Clear();
+            // Текущий уровень приключения (1..50). Если профиль не загружен, по дефолту считаем 1 уровень.
+            int currentLevel = LawnApp.CurrentUser != null ? LawnApp.CurrentUser.AdventureLevel : 1;
+
+            float startX = 13f;
+            float startY = 120f;
+            float spacingX = 90f;
+            float spacingY = 125f;
+            int cols = 8;
+
+            for (int i = 0; i < _allAvailablePlants.Length; i++)
+            {
+                // Растение доступно, если его порядковый индекс в списке меньше, чем текущий уровень приключения.
+                // На уровне 1 доступно 1 растение (индекс 0 - Peashooter).
+                // На уровне 2 (после победы в 1-1) доступно 2 растения (Peashooter и Sunflower) и так далее.
+                if (i >= currentLevel) break;
+
+                int r = i / cols;
+                int c = i % cols;
+                Vector2 pos = new(startX + (c * spacingX), startY + (r * spacingY));
+
+                var card = new SeedCard(_allAvailablePlants[i], pos)
+                {
+                    OnSelected = OnCatalogCardClicked
+                };
+                _catalogCards.Add(card);
+            }
+        }
+
+        private void OnCatalogCardClicked(SeedCard clickedCard)
+        {
+            if (_chosenCards.Contains(clickedCard.PlantType))
+            {
+                _chosenCards.Remove(clickedCard.PlantType);
+            }
+            else
+            {
+                // Ограничение: максимум 6 карт в руке игрока
+                if (_chosenCards.Count < MaxAllowedSlots)
+                {
+                    _chosenCards.Add(clickedCard.PlantType);
+                }
+            }
         }
 
         public void Update(float dt)
@@ -207,14 +233,12 @@ namespace PVZRemake.Board
                 _appearanceTimer += dt;
                 float progress = Math.Clamp(_appearanceTimer / APPEARANCE_DURATION, 0f, 1f);
 
-                // Мягко выезжаем снизу по кривой EaseInOut
                 float currentY = TodCurveMath.TodCurveEvaluate(progress, BasePosition.Y, 130f, TodCurves.CURVE_EASE_IN_OUT);
                 CurrentPosition = new Vector2(BasePosition.X, currentY);
 
                 if (progress >= 1f) _isAnimatingAppearance = false;
             }
 
-            // Выравнивание сетки относительно текущего положения экрана
             float startCatalogX = CurrentPosition.X + 20f;
             float startCatalogY = CurrentPosition.Y + 50f;
             float spacingX = 83f;
@@ -227,15 +251,12 @@ namespace PVZRemake.Board
                 int c = i % cols;
                 _catalogCards[i].Position = new Vector2(startCatalogX + (c * spacingX), startCatalogY + (r * spacingY));
 
-                // КРИТИЧЕСКИЙ ФИКС: Если растение уже выбрано геймером в банк,
-                // принудительно отключаем кликабельность (IsEnabled = false), чтобы визуально притемнить карту в каталоге
                 bool isAlreadyChosen = _chosenCards.Contains(_catalogCards[i].PlantType);
 
                 _catalogCards[i].IsEnabled = !_isAnimatingAppearance && !isAlreadyChosen;
                 _catalogCards[i].Update(dt);
             }
 
-            // Обновляем и двигаем кнопку "Let's Rock!" вслед за окном
             _btnStartGame.Position = CurrentPosition + new Vector2(750f, 650f);
             _btnStartGame.IsEnabled = (_chosenCards.Count > 0 && !_isAnimatingAppearance);
             _btnStartGame.Update(dt);
@@ -245,21 +266,16 @@ namespace PVZRemake.Board
         {
             if (_bgCatalog.AtlasTextureHandle != 0)
             {
-                // Рисуем фон каталога в его текущей анимированной позиции
                 batch.Draw(_bgCatalog, CurrentPosition, new Vector2(1.5f, 1.5f), 0f, Color4.White);
             }
 
-            // Отрисовка карт каталога
             foreach (var card in _catalogCards)
             {
-                // Чтобы дать игроку возможность убирать выбранные карты из банка обратно в каталог,
-                // сделаем так: если карта выбрана, поверх неё рисуется легкий полупрозрачный силуэт,
-                // но притемненный каркас (`cardColor` внутри `SeedCard.Render`) отработает автоматически благодаря `IsEnabled = false`.
                 card.Render(batch);
             }
 
             var font = AssetManager.GetFont("Arial", 14);
-            font?.DrawText(batch, $"Выбрано карт: {_chosenCards.Count} / 6", CurrentPosition + new Vector2(50f, 0f), Vector2.One, Color4.White);
+            font?.DrawText(batch, $"Выбрано карт: {_chosenCards.Count} / {MaxAllowedSlots}", CurrentPosition + new Vector2(50f, 0f), Vector2.One, Color4.White);
 
             _btnStartGame.Render(batch);
         }

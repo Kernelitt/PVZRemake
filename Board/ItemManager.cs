@@ -1,5 +1,6 @@
 ﻿using KrutolFramework.Core;
 using OpenTK.Mathematics;
+using PVZRemake.Scenes;
 
 namespace PVZRemake.Board
 {
@@ -39,7 +40,23 @@ namespace PVZRemake.Board
             _targetY = targetY;
 
             // Подгружаем соответствующую .reanim анимацию из базы данных
-            string animKey = type == ItemType.SunNormal || type == ItemType.SunSmall ? "SUN" : "COIN_SILVER";
+            string animKey = "SUN";
+            switch (type)
+            {
+                case ItemType.SunNormal:
+                case ItemType.SunSmall:
+                    animKey = "SUN";
+                    break;
+                case ItemType.CoinSilver:
+                    animKey = "COIN_SILVER";
+                    break;
+                case ItemType.CoinGold:
+                    animKey = "COIN_GOLD";
+                    break;
+                case ItemType.Diamond:
+                    animKey = "DIAMOND";
+                    break;
+            }
             _reanim = ReanimDatabase.CreateRuntimeAnimation(animKey) ?? throw new Exception($"[Item] Анимация {animKey} не найдена!");
 
             _reanim.LoopType = ReanimLoopType.Loop;
@@ -144,6 +161,7 @@ namespace PVZRemake.Board
         private readonly List<BoardItem> _items = [];
         private float _skySunTimer = 0f;
         private float _nextSkySunInterval = 5f; // Каждые 5-9 секунд
+        public int CollectedLevelCoins = 0;
 
         public void Clear() => _items.Clear();
 
@@ -153,12 +171,14 @@ namespace PVZRemake.Board
         public void SpawnItem(ItemType type, Vector2 worldPos)
         {
             // Эффектный вылет по параболе вверх-вбок
-            float randX = (Random.Shared.NextSingle() - 0.5f) * 160f;
+            float randX = (Random.Shared.NextSingle()) * 600f;
             float randY = -220f - Random.Shared.NextSingle() * 80f;
             Vector2 velocity = new(randX, randY);
 
             // Приземляется чуть ниже места генерации
-            float targetY = worldPos.Y + 30f + Random.Shared.NextSingle() * 20f;
+            float targetY = worldPos.Y + 80f + Random.Shared.NextSingle() * 20f;
+
+            worldPos.X += 300;
 
             _items.Add(new BoardItem(type, worldPos, velocity, targetY));
         }
@@ -224,15 +244,15 @@ namespace PVZRemake.Board
                             break;
                         case ItemType.CoinSilver:
                             Console.WriteLine("[Wallet] +10 монет (Серебро)");
-                            // LawnApp.CurrentUser.Money += 10;
+                            CollectedLevelCoins += 10;
                             break;
                         case ItemType.CoinGold:
                             Console.WriteLine("[Wallet] +50 монет (Золото)");
-                            // LawnApp.CurrentUser.Money += 50;
+                            CollectedLevelCoins += 50;
                             break;
                         case ItemType.Diamond:
                             Console.WriteLine("[Wallet] ++ АЛМАЗ! +1000 монет");
-                            // LawnApp.CurrentUser.Money += 1000;
+                            CollectedLevelCoins += 1000;
                             break;
                     }
                 });
@@ -256,6 +276,8 @@ namespace PVZRemake.Board
 
             _items.Add(new BoardItem(type, spawnPos, velocity, targetY));
         }
+
+        public void ResetLevelCoins() => CollectedLevelCoins = 0;
 
         public void Render(SpriteBatch batch, Vector2 cameraOffset)
         {

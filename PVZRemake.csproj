@@ -9,6 +9,13 @@
     <NoWin32Manifest>true</NoWin32Manifest>
     <NuGetAuditMode>all</NuGetAuditMode>
     <ApplicationIcon>main_icon.ico</ApplicationIcon>
+	  <!-- НАСТРОЙКИ СБОРКИ В ОДИН ФАЙЛ -->
+	  <!-- Включает режим публикации в один исполняемый файл -->
+	  <PublishSingleFile>true</PublishSingleFile>
+	  
+	  <!-- Включает компрессию всех встроенных DLL для уменьшения размера -->
+	  <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+	  <PublishTrimmed>false</PublishTrimmed> 
   </PropertyGroup>
 
   <ItemGroup>
