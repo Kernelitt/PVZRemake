@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows7.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <StartupObject>PVZRemake.Program</StartupObject>
+    <NoWin32Manifest>true</NoWin32Manifest>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <ApplicationIcon>main_icon.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenTK" Version="4.9.4" />
+    <PackageReference Include="SixLabors.Fonts" Version="3.1.3" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="4.1.2" />
+    <PackageReference Include="SixLabors.ImageSharp.Drawing" Version="3.1.2" />
+    <PackageReference Include="StbImageSharp" Version="2.30.16" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="KrutolFramework">
+      <HintPath>..\KrutolFramework\bin\Debug\net10.0\KrutolFramework.dll</HintPath>
+    </Reference>
+	<None Include="animations\*.*;fonts\*.*;images\*.*;reanim\*.*;particles\*.*;">
+	  <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+	</None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="main_icon.ico" />
+  </ItemGroup>
+
+</Project>
