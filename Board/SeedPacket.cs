@@ -48,6 +48,7 @@ namespace PVZRemake.Board
             var plantDef = PlantDatabase.Get(PlantType);
             string animKey = $"REANIM_{plantDef.ReanimKey.ToUpper()}";
 
+            ReanimDefinition def = AssetManager.GetAnimation(animKey);
             _iconReanim = ReanimDatabase.CreateRuntimeAnimation(plantDef.ReanimKey.ToUpper());
 
             if (_iconReanim != null)
