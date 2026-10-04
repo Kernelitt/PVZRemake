@@ -6,7 +6,7 @@ using PVZRemake.SubFramework;
 
 namespace PVZRemake.Scenes
 {
-    internal class BoardScene(string levelName = "1-1") : IScene
+    public class BoardScene(string levelName = "1-1") : IScene
     {
         private TextureRegion _backgroundTexture;
         private Vector2 _backgroundOffset = new(0f, 0f);
@@ -45,13 +45,20 @@ namespace PVZRemake.Scenes
         {
             TextureIdle = (TextureRegion)AssetManager.GetTexture("IMAGE_REANIM_SEEDCHOOSER_BUTTON2"),
             TextureHover = (TextureRegion)AssetManager.GetTexture("IMAGE_REANIM_SEEDCHOOSER_BUTTON2_GLOW"),
-            Size = new Vector2(111,26),
-            Position = new Vector2(750,600),
+            Size = new Vector2(111, 26),
+            Position = new Vector2(750, 600),
             OnClick = () =>
             {
                 _shopOverlay.IsVisible = true;
             }
         };
+        // Поддерживаемые классы для моддинга
+        public static BoardScene Instance;
+        public string CurrentLevelName => LevelName;
+        public SeedBank SeedBank => _seedBank;
+        public List<Plant> Plants => _plants;
+        public List<Zombie> Zombies => _zombies;
+
         public void Initialize()
         {
             zombies_won = ReanimDatabase.CreateRuntimeAnimation("REANIM_ZOMBIESWON");
@@ -121,7 +128,17 @@ namespace PVZRemake.Scenes
                     break;
             }
             IsDay = isDay;
+
+            Instance = this;
         }
+
+        public void ForceSetLevelState(GameLevelState newState)
+        {
+            _currentState = newState;
+            if (newState == GameLevelState.LevelWon) ApplyLevelResultsAndSave(true);
+            if (newState == GameLevelState.LevelLost) ApplyLevelResultsAndSave(false);
+        }
+
         public void Update(float dt)
         {
             // ИСПРАВЛЕНО: Безопасное накопление времени игры без постоянного насилия жесткого диска в цикле Update

@@ -62,12 +62,14 @@ public class LawnApp(GameWindowSettings gameWindowSettings, NativeWindowSettings
         mainLawnGroup.DiscoverAndLoadTextures("images");
         mainLawnGroup.DiscoverAndLoadTextures("particles");
         mainLawnGroup.DiscoverAndLoadTextures("reanim");
-        mainLawnGroup.DiscoverAndLoadAnimations("animations");    // Все анимации (REANIM_*) + авторегистрация в БД
+        mainLawnGroup.DiscoverAndLoadAnimations("animations");
         mainLawnGroup.DiscoverAndLoadParticles("particles");
 
         mainLawnGroup.LoadFont("BRIANNE_TOD","fonts/BrianneTod.ttf",18);
         mainLawnGroup.LoadFont("Arial","Arial",14);
         mainLawnGroup.LoadFont("Arial","Arial",48);
+
+        ModManager.InitAndLoadMods("mods", this);
 
         SceneManager.SwitchScene(new TitleScreen());
     }
@@ -79,6 +81,7 @@ public class LawnApp(GameWindowSettings gameWindowSettings, NativeWindowSettings
         Input.Update();
 
         float dt = (float)args.Time;
+        ModManager.TriggerUpdate(dt);
 
         Profiler.BeginSample("Update");
         SceneManager.Update(dt);
@@ -98,9 +101,9 @@ public class LawnApp(GameWindowSettings gameWindowSettings, NativeWindowSettings
         Profiler.BeginSample("Draw");
         SceneManager.Render(_spriteBatch);
         Profiler.EndSample("Draw");
-
-        
         _spriteBatch.End();
+
+        ModManager.TriggerRender();
 
         SwapBuffers();
     }
@@ -108,6 +111,8 @@ public class LawnApp(GameWindowSettings gameWindowSettings, NativeWindowSettings
     protected override void OnResize(ResizeEventArgs e)
     {
         base.OnResize(e);
+        // Прокидываем изменение размеров окна для модов
+        ModManager.TriggerResize(e.Width, e.Height);
     }
 
     protected override void OnUnload()

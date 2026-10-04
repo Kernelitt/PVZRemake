@@ -20,7 +20,7 @@ internal class Program
 #endif
 
 #if !DEBUG
-        ShowWindow(GetConsoleWindow(), 0);  // Скрыть консоль
+        ShowWindow(GetConsoleWindow(), 1);  // Скрыть консоль
 #endif
         var gameWindowSettings = new GameWindowSettings { UpdateFrequency = 75.0 };
         var nativeWindowSettings = new NativeWindowSettings

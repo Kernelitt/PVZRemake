@@ -16,7 +16,7 @@ namespace PVZRemake.Board
         private TextureRegion _texEmptyPacket;
         private TextureRegion _texGlow;
         private Reanimation _iconReanim;
-
+        public static bool DisableCooldownsCheat { get; set; } = false;
         public Action<SeedCard> OnSelected { get; set; }
 
         public SeedCard(PlantType type, Vector2 pos)
@@ -97,6 +97,8 @@ namespace PVZRemake.Board
         public override void Update(float deltaTime)
         {
             if (!IsVisible) return;
+
+            if (DisableCooldownsCheat) CooldownTimer = 0f;
 
             if (CooldownTimer > 0f)
             {
