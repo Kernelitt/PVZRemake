@@ -55,7 +55,7 @@ namespace PVZRemake.Scenes
         {
             TextureIdle = (TextureRegion)AssetManager.GetTexture("IMAGE_REANIM_SELECTORSCREEN_WOODSIGN2"),
             TextureHover = (TextureRegion)AssetManager.GetTexture("IMAGE_REANIM_SELECTORSCREEN_WOODSIGN2_PRESS"),
-            Position = new Vector2(239, 184),
+            Position = new Vector2(239, 190),
             Size = new Vector2(436, 106),
         };
 
